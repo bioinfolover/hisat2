@@ -63,7 +63,7 @@ def extract_HLA_vars(base_fname,
 
     # Corresponding genomic loci found by HISAT2 (reference is GRCh38)
     #   e.g. hisat2 --no-unal --score-min C,0 -x grch38/genome -f IMGTHLA/fasta/A_gen.fasta
-    hla_ref_file = open(base_fname +".ref", 'w')
+    hla_ref_file = open(base_fname + ".ref", 'w')
     HLA_genes, HLA_gene_strand = {}, {}
     for gene in hla_list:
         hisat2 = os.path.join(ex_path, "hisat2")
@@ -78,18 +78,11 @@ def extract_HLA_vars(base_fname,
         print aligner_cmd
         allele_id, strand = "", ''
         for line in align_proc.stdout:
-            #print line
             if line.startswith('@'):
                 continue
             line = line.strip()
             cols = line.split()
-            t_allele_id, flag = cols[:2]
-            #print t_allele_id
-            #HOWARD: Avoid selection of excluded allele as backbone
-            if t_allele_id in exclude_allele_list:
-                continue
-            allele_id = t_allele_id
-            
+            allele_id, flag = cols[:2]
             flag = int(flag)
             strand = '-' if flag & 0x10 else '+'
             AS = ""
@@ -124,8 +117,7 @@ def extract_HLA_vars(base_fname,
             gene = allele_name.split('*')[0]
             if line.find("partial") != -1 or \
                     not gene in HLA_genes or \
-                    allele_name != HLA_genes[gene] or \
-                    allele_name in exclude_allele_list :
+                    allele_name != HLA_genes[gene]:
                 skip = True
                 continue
             skip = False
@@ -168,8 +160,6 @@ def extract_HLA_vars(base_fname,
                     try:
                         name = line.split('\t')[0]
                         name = name.split()[1]
-                        if name in exclude_allele_list:
-                            continue
                         
                     except ValueError:
                         continue
@@ -314,6 +304,9 @@ def extract_HLA_vars(base_fname,
         for cmp_name, id in HLA_names.items():
             if cmp_name == backbone_name:
                 continue
+            if cmp_name in exclude_allele_list:
+                continue
+            
             assert id < len(HLA_seqs)
             cmp_seq = HLA_seqs[id]
 
@@ -431,6 +424,8 @@ def extract_HLA_vars(base_fname,
         #    (2) Confirm these constructed sequences are the same as those input sequences.
         for cmp_name, id in HLA_names.items():
             if cmp_name == backbone_name:
+                continue
+            if cmp_name in exclude_allele_list:
                 continue
 
             constr_seq = backbone_seq.replace('.', '')
@@ -723,6 +718,8 @@ def extract_HLA_vars(base_fname,
                     
         # Write all the sequences with dots removed into a file
         for name, ID in HLA_names.items():
+            if name in exclude_allele_list:
+                continue
             print >> input_file, ">%s" % (name)
             assert ID < len(HLA_seqs)
             seq = HLA_seqs[ID].replace('.', '')
