@@ -621,12 +621,15 @@ def HLA_typing(ex_path,
                     def add_N_stat(N_vars, N_haplotypes, N_read_vars):
                         haplotype_str = ""
                         for N_read_var in N_read_vars:
-                            var_type, var_pos, var_id = N_read_var
-                            var_str = "%s-%d-%s" % (var_type, var_pos, var_id)
-                            if var_str not in N_vars:
-                                N_vars[var_str] = 1
+                            if N_read_var:
+                                var_type, var_pos, var_id = N_read_var
+                                var_str = "%s-%d-%s" % (var_type, var_pos, var_id)
+                                if var_str not in N_vars:
+                                    N_vars[var_str] = 1
+                                else:
+                                    N_vars[var_str] += 1
                             else:
-                                N_vars[var_str] += 1
+                                var_str = "gap"
                             if haplotype_str != "":
                                 haplotype_str += ","
                             haplotype_str += var_str
@@ -660,13 +663,15 @@ def HLA_typing(ex_path,
                                 if allele in ["DQA1*05:05:01:01", "DQA1*05:05:01:02"]:
                                     print allele, add, var_id
 
-                    def add_N_var(N_read_vars, N_read_var):
+                    def add_N_var(N_read_vars, N_read_var, gap_in_pair):
                         if len(N_read_vars) == 0:
                             N_read_vars.append(N_read_var)
                         else:
                             var_type, var_pos, var_id = N_read_vars[-1]
                             var_type2, var_pos2, var_id2 = N_read_var
                             if var_pos < var_pos2:
+                                if gap_in_pair:
+                                    N_read_vars.append([])
                                 N_read_vars.append(N_read_var)
 
                     # Decide which allele(s) a read most likely came from
@@ -678,18 +683,28 @@ def HLA_typing(ex_path,
                         if left_pos >= var_pos and right_pos <= var_pos + int(var_data):
                             add_count(var_id, -1)
 
-                    if not concordant:
+                    # DK - for debugging purposes
+                    # if concordant and False:
+                    if concordant:
+                        concordant_second_read = (len(N_read_vars) > 0)
+                    else:
+                        concordant_second_read = False
                         add_N_stat(N_vars, N_haplotypes, N_read_vars)
                         N_read_vars = []
-                    # DK - todo: implement assembly of paired-end reads
-                    add_N_stat(N_vars, N_haplotypes, N_read_vars)
-                    N_read_vars = []
                          
                     ref_pos, read_pos, cmp_cigar_str, cmp_MD = left_pos, 0, "", ""
-                    cigar_match_len, MD_match_len = 0, 0            
-                    for cmp in cmp_list:
+                    cigar_match_len, MD_match_len = 0, 0
+                    first_diff = True
+                    for cmp_i in range(len(cmp_list)):
+                        cmp = cmp_list[cmp_i]
                         type = cmp[0]
                         length = cmp[2]
+                        gap_in_pair = False
+                        if type in ["mismatch", "deletion", "insertion"]:
+                            if concordant_second_read and first_diff:
+                                gap_in_pair = True
+                            first_diff = False
+
                         if type == "match":
                             var_idx = lower_bound(Var_list[gene], ref_pos)
                             while var_idx < len(Var_list[gene]):
@@ -754,7 +769,7 @@ def HLA_typing(ex_path,
                                             else:
                                                 add_count(var_id, 1)
                                                 known_var = True
-                                                add_N_var(N_read_vars, [var_type, ref_pos, var_id])
+                                                add_N_var(N_read_vars, [var_type, ref_pos, var_id], gap_in_pair)
                                         # daehwan - check out if this routine is appropriate
                                         # else:
                                         #    add_count(var_id, -1)
@@ -762,7 +777,7 @@ def HLA_typing(ex_path,
 
                             if not known_var:
                                 novel_var_id = add_novel_var(Novel_vars, ["single", ref_pos, read_base])
-                                add_N_var(N_read_vars, ["single", ref_pos, novel_var_id])
+                                add_N_var(N_read_vars, ["single", ref_pos, novel_var_id], gap_in_pair)
                                 
                             cmp_MD += ("%d%s" % (MD_match_len, ref_seq[ref_pos]))
                             MD_match_len = 0
@@ -791,12 +806,12 @@ def HLA_typing(ex_path,
                                                 print cmp, var_id, 1, Links[var_id]
                                             add_count(var_id, 1)
                                             known_var = True
-                                            add_N_var(N_read_vars, [var_type, ref_pos, var_id])
+                                            add_N_var(N_read_vars, [var_type, ref_pos, var_id], gap_in_pair)
                                 var_idx += 1
 
                             if not known_var:
                                 novel_var_id = add_novel_var(Novel_vars, ["insertion", ref_pos, ins_seq])
-                                add_N_var(N_read_vars, ["insertion", ref_pos, novel_var_id])
+                                add_N_var(N_read_vars, ["insertion", ref_pos, novel_var_id], gap_in_pair)
 
                             if cigar_match_len > 0:
                                 cmp_cigar_str += ("%dM" % cigar_match_len)
@@ -835,12 +850,12 @@ def HLA_typing(ex_path,
                                                 print ref_seq[var_pos - 10:var_pos], ref_seq[var_pos:var_pos+int(var_data)], ref_seq[var_pos+int(var_data):var_pos+int(var_data)+10]
                                             add_count(var_id, 1)
                                             known_var = True
-                                            add_N_var(N_read_vars, [var_type, ref_pos, var_id])
+                                            add_N_var(N_read_vars, [var_type, ref_pos, var_id], gap_in_pair)
                                 var_idx += 1
 
                             if not known_var:
                                 novel_var_id = add_novel_var(Novel_vars, ["deletion", ref_pos, str(del_len)])
-                                add_N_var(N_read_vars, ["deleltion", ref_pos, novel_var_id])
+                                add_N_var(N_read_vars, ["deleltion", ref_pos, novel_var_id], gap_in_pair)
 
                             if cigar_match_len > 0:
                                 cmp_cigar_str += ("%dM" % cigar_match_len)
@@ -876,16 +891,6 @@ def HLA_typing(ex_path,
 
                     prev_read_id = read_id
                     prev_exon = exon
-
-                    # DK - for debugging purposes
-                    if len(N_read_vars) > 0:
-                        N_novel = False
-                        for N_read_var in N_read_vars:
-                            if N_read_var[-1] == "novel":
-                                N_novel = True
-                        # print read_id, left_pos, line,
-                        # print N_read_vars
-                        # sys.exit(1)
 
                 if num_reads <= 0:
                     continue
@@ -923,13 +928,25 @@ def HLA_typing(ex_path,
                     _vars = N_haplotype.split(',')
                     cleaned_vars = []
                     for _var in _vars:
-                        if _var not in N_ignored_vars:
-                            if len(cleaned_vars):
+                        if _var == "gap":
+                            cleaned_vars.append(_var)
+                        elif _var not in N_ignored_vars:
+                            """
+                            if len(cleaned_vars) > 0:
                                 last_pos = int(cleaned_vars[-1].split('-')[1])
                                 cur_pos = int(_var.split('-')[1])
                                 assert last_pos < cur_pos
+                            """
                             cleaned_vars.append(_var)
+
                     if len(cleaned_vars) > 0:
+                        if cleaned_vars[0] == "gap":
+                            cleaned_vars = cleaned_vars[1:]
+                        elif cleaned_vars[-1] == "gap":
+                            cleaned_vars = cleaned_vars[:1]
+
+                    if len(cleaned_vars) > 0:
+                        assert cleaned_vars[0] != "gap" and cleaned_vars[-1] != "gap"
                         cleaned_haplotype = ','.join(cleaned_vars)
                         if cleaned_haplotype not in cleaned_N_haplotypes:
                             cleaned_N_haplotypes[cleaned_haplotype] = count
@@ -978,8 +995,168 @@ def HLA_typing(ex_path,
                         print N_haplotype, N_haplotypes[N_haplotype]
 
                 def assemble_alleles(N_haplotype_list, max_allele = 2):
-                    def a_include_b(a_vars, b_vars):
-                        return set(a_vars).union(b_vars) == set(a_vars)
+                    def assemble_two_haplotypes(a_vars, b_vars):
+                        c_vars = []
+                        a_i, b_i = 0, 0
+                        while a_i < len(a_vars) or b_i < len(b_vars):
+                            if a_i == len(a_vars):
+                                c_vars += b_vars[b_i:]
+                                break
+                            elif b_i == len(b_vars):
+                                c_vars += a_vars[a_i:]
+                                break
+                            else:
+                                a_var = a_vars[a_i]
+                                b_var = b_vars[b_i]
+                                if a_var == "gap" and b_var == "gap":
+                                    c_vars.append("gap")                                
+                                if a_var == "gap":
+                                    assert a_i + 1 < len(a_vars)
+                                    a_var = a_vars[a_i + 1]
+                                    a_i += 1
+                                if b_var == "gap":
+                                    assert b_i + 1 < len(b_vars)
+                                    b_var = b_vars[b_i + 1]
+                                    b_i += 1
+                                assert a_var != "gap" and b_var != "gap"
+                                if a_var == b_var:
+                                    a_i += 1
+                                    b_i += 1
+                                    c_vars.append(a_var)
+                                else:
+                                    a_pos = int(a_var.split('-')[1])
+                                    b_pos = int(b_var.split('-')[1])
+                                    assert a_pos != b_pos
+                                    if a_pos < b_pos:
+                                        while a_i < len(a_vars):
+                                            a_var = a_vars[a_i]
+                                            if a_var == b_var:
+                                                a_i += 1
+                                                b_i += 1
+                                                c_vars.append(a_var)
+                                                break
+                                            elif a_var == "gap":
+                                                a_i += 1
+                                                c_vars.append(a_var)
+                                            else:
+
+                                                # DK - for debugging purposes
+                                                if a_var == "gap":
+                                                    print "a:", a_vars
+                                                    print "b:", b_vars
+                                                    print "c:", c_vars
+                                                    print a_var, b_var
+                                                
+                                                a_pos = int(a_var.split('-')[1])
+                                                assert a_pos != b_pos
+                                                if a_pos > b_pos:
+                                                    return [], False
+                                                a_i += 1
+                                                c_vars.append(a_var)
+
+                                    else:
+                                        while b_i < len(b_vars):
+                                            b_var = b_vars[b_i]
+                                            if a_var == b_var:
+                                                a_i += 1
+                                                b_i += 1
+                                                c_vars.append(b_var)
+                                                break
+                                            elif b_var == "gap":
+                                                b_i += 1
+                                                c_vars.append(b_var)
+                                            else:
+                                                b_pos = int(b_var.split('-')[1])
+                                                assert a_pos != b_pos
+                                                if b_pos > a_pos:
+                                                    return [], False
+                                                b_i += 1
+                                                c_vars.append(b_var)
+                        return c_vars, True
+
+                    # DK - for debugging purposes
+                    """
+                    a = "single-91-hv45,gap,single-158-hv49,single-245-hv54"
+                    b = "single-91-hv45,gap,single-245-hv54,single-255-hv56"
+                    c_vars, success = assemble_two_haplotypes(a.split(','), b.split(','))
+                    print "a:", a
+                    print "b:", b
+                    print "c:", ','.join(c_vars), success
+                    sys.exit(1)
+                    """
+
+                    """
+                    def assemble_two_haplotypes(a_vars, b_vars):
+                        c_vars = []
+                        a_i, b_i = 0, 0
+                        while a_i < len(a_vars) or b_i < len(b_vars):
+                            if a_i == len(a_vars):
+                                c_vars += b_vars[b_i:]
+                                break
+                            elif b_i == len(b_vars):
+                                c_vars += a_vars[a_i:]
+                                break
+                            else:
+                                a_var = a_vars[a_i]
+                                b_var = b_vars[b_i]
+                                if a_var == "gap" or b_var == "gap":
+                                    if a_var == "gap" and b_var == "gap":
+                                        c_vars.append(a_var)
+                                        a_i += 1
+                                        b_i += 1
+                                    else:
+                                        if a_var == "gap":
+                                            assert a_i + 1 < len(a_vars)
+                                            a_next_var = a_vars[a_i + 1]
+                                            assert a_next_var != "gap"
+                                            a_next_pos = int(a_next_var.split('-')[1])
+                                            b_pos = int(b_var.split('-')[1])
+                                            if a_next_pos < b_pos:
+                                                c_vars.append(a_var)
+                                                a_i += 1
+                                            elif a_next_pos == b_pos:
+                                                assert a_next_var == b_var
+                                                if b_i == 0:
+                                                    c_vars.append(a_var)
+                                                c_vars.append(b_var)
+                                                a_i += 2
+                                                b_i += 1
+                                            else:
+                                                c_vars.append(b_var)
+                                                b_i += 1
+                                        else:
+                                            assert b_i + 1 < len(b_vars)
+                                            b_next_var = b_vars[b_i + 1]
+                                            assert b_next_var != "gap"
+                                            a_pos = int(a_var.split('-')[1])
+                                            b_next_pos = int(b_next_var.split('-')[1])
+                                            if a_pos < b_next_pos:
+                                                c_vars.append(a_var)
+                                                a_i += 1
+                                            elif a_pos == b_next_pos:
+                                                assert a_var == b_next_var
+                                                c_vars.append(a_var)
+                                                a_i += 1
+                                                b_i += 2
+                                            else:
+                                                c_vars.append(b_var)
+                                                b_i += 1
+                                else:
+                                    if a_var == b_var:
+                                        c_vars.append(a_var)
+                                        a_i += 1
+                                        b_i += 1
+                                    else:
+                                        a_pos = int(a_var.split('-')[1])
+                                        b_pos = int(b_var.split('-')[1])
+                                        if a_pos < b_pos:
+                                            c_vars.append(a_var)
+                                            a_i += 1
+                                        else:
+                                            c_vars.append(b_var)
+                                            b_i += 1
+                        return c_vars
+                    """
 
                     N_alleles = set()
                     alleles = [[N_haplotype_list[0], 1]]
@@ -997,39 +1174,15 @@ def HLA_typing(ex_path,
                             b_vars = b.split(',')
                             assert len(b_vars) > 0
 
-                            if a_include_b(a_vars, b_vars):
-                                alleles.append([a, i + 1])
-                            elif a_include_b(b_vars, a_vars):
-                                alleles.append([b, i + 1])
+                            c_vars, success = assemble_two_haplotypes(a_vars, b_vars)
+                            if success:
+                                c = ','.join(c_vars)                                    
+                                alleles.append([c, i + 1])
                             else:
-                                a_last = a_vars[-1]
-                                b_first = b_vars[0]
-
-                                a_last_pos = int(a_last.split('-')[1])
-                                b_first_pos = int(b_first.split('-')[1])
-                                if a_last_pos < b_first_pos:
-                                    c = a + "," + b
-                                    alleles.append([c, i + 1])
-                                else:
-                                    compatible = False
-                                    for j in reversed(range(len(a_vars))):
-                                        a_j = a_vars[j]
-                                        if a_j == b_first:
-                                            same = True
-                                            for k in range(j + 1, len(a_vars)):
-                                                if k-j >= len(b_vars) or a_vars[k] != b_vars[k-j]:
-                                                    same = False
-                                            if same:
-                                                compatible = True
-                                                c_vars = a_vars + b_vars[len(a_vars) - j:]
-                                                c = ','.join(c_vars)
-                                                alleles.append([c, i + 1])
-                                                break
-                                    if not compatible:
-                                        # DK - temporary
-                                        if len(alleles) == 0:
-                                            alleles.append([b, i + 1])
-                                        alleles.append([a, i + 1])                                        
+                                # DK - temporary
+                                if len(alleles) == 0:
+                                    alleles.append([b, i + 1])
+                                alleles.append([a, i + 1])                                        
                     return N_alleles
                     
                 N_alleles = assemble_alleles(N_haplotype_list, len(test_HLA_names))
@@ -1050,6 +1203,8 @@ def HLA_typing(ex_path,
                             if backbone_seq == backbone_seq_default:
                                 calculated_var_ids = []
                                 for _var in _vars:
+                                    if _var == "gap":
+                                        continue
                                     _var_id = _var.split('-')[2]
                                     calculated_var_ids.append(_var_id)
 
@@ -1092,11 +1247,6 @@ def HLA_typing(ex_path,
                                         else:
                                             if _i > 0 and _j > 0:
                                                 same = False
-
-                                            # DK - for debugging purposes
-                                            if c_var[1] == t_var[1]:
-                                                print c_var, t_var
-                                                
                                             if c_var[1] <= t_var[1]:
                                                 _i += 1
                                                 print "%4d\t%d %s %s (%s) <>" % (_k, c_var[1], c_var[0], c_var[2], c_var_id)
