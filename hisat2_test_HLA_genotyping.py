@@ -322,6 +322,7 @@ def HLA_typing(ex_path,
                exclude_allele_list,
                aligners,
                num_mismatch,
+               concordant_assembly,
                fastq,
                read_fname,
                alignment_fname,
@@ -452,7 +453,7 @@ def HLA_typing(ex_path,
                     if flag & 0x4 != 0:
                         continue
 
-                    # Concondantly mapped?
+                    # Concordantly mapped?
                     if flag & 0x2 != 0:
                         concordant = True
                     else:
@@ -683,9 +684,7 @@ def HLA_typing(ex_path,
                         if left_pos >= var_pos and right_pos <= var_pos + int(var_data):
                             add_count(var_id, -1)
 
-                    # DK - for debugging purposes
-                    # if concordant and False:
-                    if concordant:
+                    if concordant and concordant_assembly:
                         concordant_second_read = (len(N_read_vars) > 0)
                     else:
                         concordant_second_read = False
@@ -1014,10 +1013,16 @@ def HLA_typing(ex_path,
                                     assert a_i + 1 < len(a_vars)
                                     a_var = a_vars[a_i + 1]
                                     a_i += 1
+                                    a_was_gap = True
+                                else:
+                                    a_was_gap = False
                                 if b_var == "gap":
                                     assert b_i + 1 < len(b_vars)
                                     b_var = b_vars[b_i + 1]
                                     b_i += 1
+                                    b_was_gap = True
+                                else:
+                                    b_was_gap = False
                                 assert a_var != "gap" and b_var != "gap"
                                 if a_var == b_var:
                                     a_i += 1
@@ -1026,52 +1031,59 @@ def HLA_typing(ex_path,
                                 else:
                                     a_pos = int(a_var.split('-')[1])
                                     b_pos = int(b_var.split('-')[1])
-                                    assert a_pos != b_pos
-                                    if a_pos < b_pos:
-                                        while a_i < len(a_vars):
-                                            a_var = a_vars[a_i]
-                                            if a_var == b_var:
-                                                a_i += 1
-                                                b_i += 1
-                                                c_vars.append(a_var)
-                                                break
-                                            elif a_var == "gap":
-                                                a_i += 1
-                                                c_vars.append(a_var)
-                                            else:
-
-                                                # DK - for debugging purposes
-                                                if a_var == "gap":
-                                                    print "a:", a_vars
-                                                    print "b:", b_vars
-                                                    print "c:", c_vars
-                                                    print a_var, b_var
-                                                
-                                                a_pos = int(a_var.split('-')[1])
-                                                assert a_pos != b_pos
-                                                if a_pos > b_pos:
-                                                    return [], False
-                                                a_i += 1
-                                                c_vars.append(a_var)
-
+                                    if a_pos == b_pos:
+                                        return [], False
+                                    if a_was_gap or b_was_gap:
+                                        if a_pos < b_pos:
+                                            if not b_was_gap:
+                                                c_vars.append("gap")
+                                            while a_i < len(a_vars):
+                                                a_var = a_vars[a_i]
+                                                if a_var == b_var:
+                                                    a_i += 1
+                                                    b_i += 1
+                                                    c_vars.append(a_var)
+                                                    break
+                                                elif a_var == "gap":
+                                                    a_i += 1
+                                                    c_vars.append(a_var)
+                                                else:
+                                                    a_pos = int(a_var.split('-')[1])
+                                                    if a_pos >= b_pos:
+                                                        return [], False
+                                                    a_i += 1
+                                                    c_vars.append(a_var)
+                                        else:
+                                            if not a_was_gap:
+                                                c_vars.append("gap")
+                                            while b_i < len(b_vars):
+                                                b_var = b_vars[b_i]
+                                                if a_var == b_var:
+                                                    a_i += 1
+                                                    b_i += 1
+                                                    c_vars.append(b_var)
+                                                    break
+                                                elif b_var == "gap":
+                                                    b_i += 1
+                                                    c_vars.append(b_var)
+                                                else:
+                                                    b_pos = int(b_var.split('-')[1])
+                                                    if b_pos >= a_pos:
+                                                        return [], False
+                                                    b_i += 1
+                                                    c_vars.append(b_var)
+                                            if a_var != b_var:
+                                                return [], False
                                     else:
-                                        while b_i < len(b_vars):
-                                            b_var = b_vars[b_i]
-                                            if a_var == b_var:
-                                                a_i += 1
-                                                b_i += 1
-                                                c_vars.append(b_var)
-                                                break
-                                            elif b_var == "gap":
-                                                b_i += 1
-                                                c_vars.append(b_var)
-                                            else:
-                                                b_pos = int(b_var.split('-')[1])
-                                                assert a_pos != b_pos
-                                                if b_pos > a_pos:
-                                                    return [], False
-                                                b_i += 1
-                                                c_vars.append(b_var)
+                                        assert not a_was_gap and not b_was_gap
+                                        assert a_pos != b_pos
+                                        if a_pos < b_pos and b_i == 0:
+                                            c_vars.append(a_var)
+                                            a_i += 1
+                                        else:
+                                            return [], False
+                                            
+                                            
                         return c_vars, True
 
                     # DK - for debugging purposes
@@ -1083,79 +1095,6 @@ def HLA_typing(ex_path,
                     print "b:", b
                     print "c:", ','.join(c_vars), success
                     sys.exit(1)
-                    """
-
-                    """
-                    def assemble_two_haplotypes(a_vars, b_vars):
-                        c_vars = []
-                        a_i, b_i = 0, 0
-                        while a_i < len(a_vars) or b_i < len(b_vars):
-                            if a_i == len(a_vars):
-                                c_vars += b_vars[b_i:]
-                                break
-                            elif b_i == len(b_vars):
-                                c_vars += a_vars[a_i:]
-                                break
-                            else:
-                                a_var = a_vars[a_i]
-                                b_var = b_vars[b_i]
-                                if a_var == "gap" or b_var == "gap":
-                                    if a_var == "gap" and b_var == "gap":
-                                        c_vars.append(a_var)
-                                        a_i += 1
-                                        b_i += 1
-                                    else:
-                                        if a_var == "gap":
-                                            assert a_i + 1 < len(a_vars)
-                                            a_next_var = a_vars[a_i + 1]
-                                            assert a_next_var != "gap"
-                                            a_next_pos = int(a_next_var.split('-')[1])
-                                            b_pos = int(b_var.split('-')[1])
-                                            if a_next_pos < b_pos:
-                                                c_vars.append(a_var)
-                                                a_i += 1
-                                            elif a_next_pos == b_pos:
-                                                assert a_next_var == b_var
-                                                if b_i == 0:
-                                                    c_vars.append(a_var)
-                                                c_vars.append(b_var)
-                                                a_i += 2
-                                                b_i += 1
-                                            else:
-                                                c_vars.append(b_var)
-                                                b_i += 1
-                                        else:
-                                            assert b_i + 1 < len(b_vars)
-                                            b_next_var = b_vars[b_i + 1]
-                                            assert b_next_var != "gap"
-                                            a_pos = int(a_var.split('-')[1])
-                                            b_next_pos = int(b_next_var.split('-')[1])
-                                            if a_pos < b_next_pos:
-                                                c_vars.append(a_var)
-                                                a_i += 1
-                                            elif a_pos == b_next_pos:
-                                                assert a_var == b_next_var
-                                                c_vars.append(a_var)
-                                                a_i += 1
-                                                b_i += 2
-                                            else:
-                                                c_vars.append(b_var)
-                                                b_i += 1
-                                else:
-                                    if a_var == b_var:
-                                        c_vars.append(a_var)
-                                        a_i += 1
-                                        b_i += 1
-                                    else:
-                                        a_pos = int(a_var.split('-')[1])
-                                        b_pos = int(b_var.split('-')[1])
-                                        if a_pos < b_pos:
-                                            c_vars.append(a_var)
-                                            a_i += 1
-                                        else:
-                                            c_vars.append(b_var)
-                                            b_i += 1
-                        return c_vars
                     """
 
                     N_alleles = set()
@@ -1175,8 +1114,18 @@ def HLA_typing(ex_path,
                             assert len(b_vars) > 0
 
                             c_vars, success = assemble_two_haplotypes(a_vars, b_vars)
+                            c = ','.join(c_vars)
+                            
+                            # DK - for debugging purposes
+                            """
+                            if c.find("deletion-1395-hv305,single-1441-hv314") != -1:
+                                print "a:", a
+                                print "b:", b
+                                print "c:", ','.join(c_vars), success
+                                sys.exit(1)
+                            """
+                            
                             if success:
-                                c = ','.join(c_vars)                                    
                                 alleles.append([c, i + 1])
                             else:
                                 # DK - temporary
@@ -1192,87 +1141,106 @@ def HLA_typing(ex_path,
                         print "\t", N_allele
 
                 if simulation:
-                    for test_allele_name in test_HLA_names:
-                        for N_allele in N_alleles:
-                            same = True
-                            _vars = N_allele.split(',')
+                    for N_allele in N_alleles:
+                        same = True
+                        _vars = N_allele.split(',')
 
-                            backbone_seq = HLAs[gene][ref_allele]
-                            backbone_seq_default = HLAs_default[gene][ref_allele]
-                            assert backbone_seq == backbone_seq_default
-                            if backbone_seq == backbone_seq_default:
-                                calculated_var_ids = []
-                                for _var in _vars:
-                                    if _var == "gap":
-                                        continue
-                                    _var_id = _var.split('-')[2]
-                                    calculated_var_ids.append(_var_id)
+                        backbone_seq = HLAs[gene][ref_allele]
+                        backbone_seq_default = HLAs_default[gene][ref_allele]
+                        assert backbone_seq == backbone_seq_default
+                        if backbone_seq == backbone_seq_default:
+                            calculated_var_ids = []
+                            calculated_vars = set()
+                            for _var in _vars:
+                                if _var == "gap":
+                                    continue
+                                _var_type, _var_pos, _var_id = _var.split('-')
+                                calculated_var_ids.append(_var_id)
+                                calculated_vars.add("%s-%s" % (_var_type, _var_pos))
 
-                                true_var_ids = []
+                            cmp_allele_name = ""
+                            num_common = 0
+                            for test_allele_name in test_HLA_names:
+                                cmp_vars = set()
                                 for _var_id in Var_list_default[gene]:
                                     _var_pos, _var_id = _var_id
                                     if test_allele_name in Links_default[_var_id]:
-                                        true_var_ids.append(_var_id)
-                                        
-                                _i, _j, _k = 0, 0, 0
-                                while _i < len(calculated_var_ids) or _j < len(true_var_ids):
-                                    if _i == len(calculated_var_ids):
-                                        t_var_id = true_var_ids[_j]
-                                        t_var = Vars_default[gene][t_var_id]
-                                        print "%4d\t<> %d %s %s (%s)" % (_k, t_var[1], t_var[0], t_var[2], t_var_id)
-                                        _j += 1
-                                        _k += 1
-                                    elif _j == len(true_var_ids):
-                                        c_var_id = calculated_var_ids[_i]
-                                        if c_var_id.find("novel") != -1:
-                                            c_var = Novel_vars[c_var_id]
-                                        else:
-                                            c_var = Vars[gene][c_var_id]
-                                        print "%4d\t%d %s %s (%s) <>" % (_k, c_var[1], c_var[0], c_var[2], c_var_id)
-                                        _i += 1
-                                        _k += 1
+                                        _var_type, _var_pos, _ = Vars_default[gene][_var_id]
+                                        cmp_vars.add("%s-%d" % (_var_type, _var_pos))
+                                tmp_num_common = len(calculated_vars.intersection(cmp_vars))
+                                if num_common < tmp_num_common:
+                                    num_common = tmp_num_common
+                                    cmp_allele_name = test_allele_name
+
+                                    # DK - for debugging purposes
+                                    break
+
+                            assert cmp_allele_name != ""
+                            true_var_ids = []
+                            for _var_id in Var_list_default[gene]:
+                                _var_pos, _var_id = _var_id
+                                if cmp_allele_name in Links_default[_var_id]:
+                                    true_var_ids.append(_var_id)
+
+                            _i, _j, _k = 0, 0, 0
+                            while _i < len(calculated_var_ids) or _j < len(true_var_ids):
+                                if _i == len(calculated_var_ids):
+                                    t_var_id = true_var_ids[_j]
+                                    t_var = Vars_default[gene][t_var_id]
+                                    print "%4d\t<> %d %s %s (%s)" % (_k, t_var[1], t_var[0], t_var[2], t_var_id)
+                                    _j += 1
+                                    _k += 1
+                                elif _j == len(true_var_ids):
+                                    c_var_id = calculated_var_ids[_i]
+                                    if c_var_id.find("novel") != -1:
+                                        c_var = Novel_vars[c_var_id]
                                     else:
-                                        c_var_id = calculated_var_ids[_i]
-                                        if c_var_id.find("novel") != -1:
-                                            c_var = Novel_vars[c_var_id]
-                                        else:
-                                            c_var = Vars[gene][c_var_id]
-                                        t_var_id = true_var_ids[_j]
-                                        t_var = Vars_default[gene][t_var_id]
+                                        c_var = Vars[gene][c_var_id]
+                                    print "%4d\t%d %s %s (%s) <>" % (_k, c_var[1], c_var[0], c_var[2], c_var_id)
+                                    _i += 1
+                                    _k += 1
+                                else:
+                                    c_var_id = calculated_var_ids[_i]
+                                    if c_var_id.find("novel") != -1:
+                                        c_var = Novel_vars[c_var_id]
+                                    else:
+                                        c_var = Vars[gene][c_var_id]
+                                    t_var_id = true_var_ids[_j]
+                                    t_var = Vars_default[gene][t_var_id]
 
-                                        if c_var == t_var:
-                                            print "%4d\tsame: %d %s %s (%s)" % (_k, c_var[1], c_var[0], c_var[2], c_var_id)
+                                    if c_var == t_var:
+                                        print "%4d\tsame: %d %s %s (%s)" % (_k, c_var[1], c_var[0], c_var[2], c_var_id)
+                                        _i += 1
+                                        _j += 1
+                                    else:
+                                        if _i > 0 and _j > 0:
+                                            same = False
+                                        if c_var[1] <= t_var[1]:
                                             _i += 1
-                                            _j += 1
+                                            print "%4d\t%d %s %s (%s) <>" % (_k, c_var[1], c_var[0], c_var[2], c_var_id)
                                         else:
-                                            if _i > 0 and _j > 0:
-                                                same = False
-                                            if c_var[1] <= t_var[1]:
-                                                _i += 1
-                                                print "%4d\t%d %s %s (%s) <>" % (_k, c_var[1], c_var[0], c_var[2], c_var_id)
-                                            else:
-                                                _j += 1
-                                                print "%4d\t<> %d %s %s (%s)" % (_k, t_var[1], t_var[0], t_var[2], t_var_id)
-                                        _k += 1
-                            else:
-                                _var_ids = []
-                                for _var in _vars:
-                                    _var_id = _var.split('-')[2]
-                                    _var_ids.append(_var_id)
-                                calculated_allele_seq = construct_allele_seq(backbone_seq, _var_ids, Vars[gene])
-                                true_allele_seq = HLAs_default[gene][test_allele_name]
+                                            _j += 1
+                                            print "%4d\t<> %d %s %s (%s)" % (_k, t_var[1], t_var[0], t_var[2], t_var_id)
+                                    _k += 1
+                        else:
+                            _var_ids = []
+                            for _var in _vars:
+                                _var_id = _var.split('-')[2]
+                                _var_ids.append(_var_id)
+                            calculated_allele_seq = construct_allele_seq(backbone_seq, _var_ids, Vars[gene])
+                            true_allele_seq = HLAs_default[gene][test_allele_name]
 
-                                print "calculated allele: %d bp" % len(calculated_allele_seq)
-                                print "true allele: %d bp" % len(true_allele_seq)
-                                if calculated_allele_seq != true_allele_seq:
-                                    if calculated_allele_seq.find(true_allele_seq) == -1 and \
-                                            true_allele_seq.find(calculated_allele_seq) == -1:
-                                        same = False
-                                        
-                            if same:
-                                print "Same!!"
-                            else:
-                                print "Different!!"
+                            print "calculated allele: %d bp" % len(calculated_allele_seq)
+                            print "true allele: %d bp" % len(true_allele_seq)
+                            if calculated_allele_seq != true_allele_seq:
+                                if calculated_allele_seq.find(true_allele_seq) == -1 and \
+                                        true_allele_seq.find(calculated_allele_seq) == -1:
+                                    same = False
+
+                        if same:
+                            print "Same!!"
+                        else:
+                            print "Different!!"
 
                 # Coverage
                 # it is not used by the default
@@ -1603,6 +1571,7 @@ def test_HLA_genotyping(base_fname,
                         exclude_allele_list,
                         default_allele_list,
                         num_mismatch,
+                        concordant_assembly,
                         verbose,
                         daehwan_debug):
     # Current script directory
@@ -1988,6 +1957,7 @@ def test_HLA_genotyping(base_fname,
                                          exclude_allele_list,
                                          aligners,
                                          num_mismatch,
+                                         concordant_assembly,
                                          fastq,
                                          read_fname,
                                          alignment_fname,
@@ -2122,6 +2092,10 @@ if __name__ == '__main__':
                         type=str,
                         default="",
                         help="e.g., test_id:10,read_id:10000,basic_test")
+    parser.add_argument("--no-concordant-assembly",
+                        dest="concordant_assembly",
+                        action="store_false",
+                        help="")
     parser.add_argument("--novel_allele_detection",
                         dest="novel_allele_detection",
                         action='store_true',
@@ -2224,5 +2198,6 @@ if __name__ == '__main__':
                         args.exclude_allele_list,
                         args.default_allele_list,
                         args.num_mismatch,
+                        args.concordant_assembly,
                         args.verbose,
                         debug)
