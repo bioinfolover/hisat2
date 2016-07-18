@@ -37,7 +37,9 @@ def simulate_reads(HLAs,
         # ref_seq = HLAs[gene][ref_allele]
 
         # Simulate reads from two HLA alleles
-        def simulate_reads_impl(seq, simulate_interval = 1, frag_len = 250, read_len = 100):
+        # DK - for debugging purposes
+        # def simulate_reads_impl(seq, simulate_interval = 1, frag_len = 250, read_len = 100):
+        def simulate_reads_impl(seq, simulate_interval = 1, frag_len = 350, read_len = 150):
             comp_table = {'A':'T', 'C':'G', 'G':'C', 'T':'A'}
             reads_1, reads_2 = [], []
             for i in range(0, len(seq) - frag_len + 1, simulate_interval):
@@ -627,6 +629,9 @@ def HLA_typing(ex_path,
 
                     def add_N_stat(N_vars, N_haplotypes, N_read_vars):
                         haplotype_str, haplotype_canonical_str = "", ""
+                        if len(N_read_vars) == 1:
+                            if N_read_vars[0][0] == "nothing":
+                                return
                         # Sanity check
                         for i in range(len(N_read_vars)):
                             N_read_var = N_read_vars[i]
@@ -715,7 +720,7 @@ def HLA_typing(ex_path,
                         unknown_in_pair = []
                         if type in ["mismatch", "deletion", "insertion"]:
                             if concordant_second_read and first_diff:
-                                if prev_right_pos < left_pos:
+                                if prev_right_pos < left_pos - 1:
                                     unknown_in_pair = [prev_right_pos, left_pos]
                             first_diff = False
 
@@ -761,10 +766,12 @@ def HLA_typing(ex_path,
                                         # DK - should fix the following
                                         None
                                     else:
-                                        add_N_var(N_read_vars, ["nothing", ref_pos, ref_pos + length - 1, "nothing"], [])                                    
+                                        if length > 20:
+                                            add_N_var(N_read_vars, ["nothing", ref_pos + 10, ref_pos + 10, "nothing"], [])                                    
                             elif cmp_i + 1 == len(cmp_list) or (cmp_i + 2 == len(cmp_list) and cmp_list[-1][0] == "soft"):
                                 if not concordant or concordant_second_read:
-                                    add_N_var(N_read_vars, ["nothing", ref_pos, ref_pos + length - 1, "nothing"], [])
+                                    if length > 20:
+                                        add_N_var(N_read_vars, ["nothing", ref_pos + length - 1 - 10, ref_pos + length - 1 - 10, "nothing"], [])
 
                             read_pos += length
                             ref_pos += length
@@ -1027,6 +1034,21 @@ def HLA_typing(ex_path,
                         print N_haplotype, len(N_haplotypes[N_haplotype])
 
                 def assemble_alleles(N_haplotype_list, max_allele = 2):
+                    const_deletion_relax = 10
+                    def get_var_info(var):
+                        var_type, var_left, var_data = var.split('-')[:3]
+                        var_left = int(var_left)
+                        if var_type == "unknown":
+                            var_right = int(var_data)
+                        elif var_type == "deletion":
+                            var_right = var_left + int(var_data) - 1
+                        else:
+                            var_right = var_left
+                        assert var_left <= var_right
+                        if var_type == "nothing":
+                            assert var_left == var_right
+                        return var_type, var_left, var_right
+                    
                     def assemble_two_haplotypes(a_vars, b_vars):
                         a_vars, b_vars = a_vars[:], b_vars[:]
                         c_vars = []
@@ -1047,234 +1069,164 @@ def HLA_typing(ex_path,
                                     c_vars.append(a_var)
                                     continue
 
-                                a_type, a_pos, a_data, a_id = a_var.split('-')
-                                b_type, b_pos, b_data, b_id = b_var.split('-')
-                                a_pos, b_pos = int(a_pos), int(b_pos)
-                                if a_type == "deletion":
-                                    a_pos2 = a_pos + int(a_data) - 1
-                                elif a_type in ["unknown", "nothing"]:
-                                    a_pos2 = int(a_data)
-                                else:
-                                    a_pos2 = a_pos
-                                a_left, a_right = a_pos, a_pos2
-                                if b_type == "deletion":
-                                    b_pos2 = b_pos + int(b_data) - 1
-                                elif b_type in ["unknown", "nothing"]:
-                                    b_pos2 = int(b_data)
-                                else:
-                                    b_pos2 = b_pos
-                                b_left, b_right = b_pos, b_pos2
+                                a_type, a_left, a_right = get_var_info(a_var)
+                                b_type, b_left, b_right = get_var_info(b_var)
 
                                 if a_type == "nothing":
                                     assert a_i == 0 or a_i + 1 == len(a_vars)
                                 if b_type == "nothing":
                                     assert b_i == 0 or b_i + 1 == len(b_vars)
-                                if a_type == "nothing" or b_type == "nothing":
-                                    if a_type == "nothing" and b_type == "nothing":
-                                        if a_i == 0:
-                                            assert a_left <= b_left
-                                            c_vars.append("nothing-%d-%d-nothing" % (a_left, a_right))
-                                        else:
-                                            if b_i == 0:
-                                                if a_right < b_left:
-                                                    return c_vars, False
-                                                elif a_left <= b_left:
-                                                    c_vars.append("nothing-%d-%d-nothing" % (a_left, min(a_right, b_right)))
+                                                
+                                if a_type == "nothing":
+                                    if a_i == 0:
+                                        assert a_left <= b_left
+                                        c_vars.append("nothing-%d-%d-nothing" % (a_left, a_left))
+                                        a_i += 1
+                                        while a_i < len(a_vars):
+                                            a_var = a_vars[a_i]
+                                            a_type, a_left, a_right = get_var_info(a_var)
+                                            if a_right < b_left:
+                                                if a_i + 1 == len(a_vars):
+                                                    if b_type == "nothing":
+                                                        b_i += 1
+                                                        break
+                                                    break
+                                                else:
+                                                    c_vars.append(a_var)
                                             else:
-                                                assert b_i + 1 == len(b_vars)
-                                                c_vars.append("nothing-%d-%d-nothing" % (b_left, b_right))
+                                                if b_type == "nothing":
+                                                    if a_type == "unknown":
+                                                        if a_left < b_left and a_right > b_left:
+                                                            a_vars[a_i] = "unknown-%d-%d-unknown" % (b_left, a_right)
+                                                            assert b_left <= a_right
+                                                    elif a_type == "deletion":
+                                                        relax = const_deletion_relax if b_type == "deletion" else 0
+                                                        if a_right < b_left + relax:
+                                                            c_vars.append(a_var)
+                                                            a_i += 1
+                                                    b_i += 1
                                                 break
+                                            a_i += 1
+                                    else:
+                                        a_i += 1
+                                        assert a_i == len(a_vars)
+                                        while b_i < len(b_vars):
+                                            b_var = b_vars[b_i]
+                                            b_type, b_left, b_right = get_var_info(b_var)
+                                            if b_type == "nothing":
+                                                if b_i == 0:
+                                                    if a_right < b_left:
+                                                        return c_vars, False
+                                                else:
+                                                    c_vars.append("nothing-%d-%d-nothing" % (b_right, b_right))
+                                            elif b_type == "unknown":
+                                                if b_left < a_right and b_right > a_right:
+                                                    c_vars.append("unknown-%d-%d-unknown" % (a_right + 1, b_right))
+                                            else:
+                                                relax = const_deletion_relax if b_type == "deletion" else 0
+                                                if b_left + relax < a_right:
+                                                    return c_vars, False
+                                                else:
+                                                    break
+                                            b_i += 1
+                                elif b_type == "nothing":
+                                    if b_i == 0:
+                                        assert False
+                                    else:
+                                        b_i += 1
+                                        assert b_i == len(b_vars)
+                                        while a_i < len(a_vars):
+                                            a_var = a_vars[a_i]
+                                            a_type, a_left, a_right = get_var_info(a_var)
+                                            relax = 1
+                                            if a_left > b_right + relax:
+                                                break
+                                            else:
+                                                if a_type == "unknown":
+                                                    if a_right > b_right:
+                                                        c_vars.append("unknown-%d-%d-unknown" % (b_right + 1, a_right))
+                                                        a_i += 1
+                                                elif a_type == "deletion":
+                                                    relax = const_deletion_relax if b_type == "deletion" else 0
+                                                    if a_right < b_right + relax:
+                                                        c_vars.append(a_var)
+                                                        a_i += 1
+                                                else:
+                                                    return c_vars, False
+                                                break
+                                            a_i += 1
+                                        
+                                else:
+                                    assert a_type != "nothing" and b_type != "nothing"
+                                    if a_type == "unknown" and b_type == "unknown":
+                                        if (a_left <= b_left and a_right >= b_left) or \
+                                                (b_left <= a_left and b_right >= a_left):
+                                            c_vars.append("unknown-%d-%d-unknown" % (max(a_left, b_left), min(a_right, b_right)))
                                         a_i += 1
                                         b_i += 1
                                         if a_right < b_right:
                                             while a_i < len(a_vars):
                                                 a_var = a_vars[a_i]
-                                                a_type, a_left, a_data = a_var.split('-')[:3]
-                                                a_left = int(a_left)
-                                                if a_left > b_right:
-                                                    break
+                                                a_type, a_pos, a_data = a_var.split('-')[:3]
                                                 if a_type in ["unknown", "nothing"]:
                                                     a_right = int(a_data)
-                                                elif a_type == "deleltion":
-                                                    a_right = a_left + int(a_data) - 1
                                                 else:
-                                                    a_right = a_left
-                                                if a_type == "unknown":
-                                                    a_right = int(a_data)
-                                                    if a_left < b_left:
-                                                        c_vars.append("unknown-%d-%d-unknown" % (a_left, min(a_right, b_right - 1)))
-                                                    elif a_right > b_right:
-                                                        c_vars.append("unknown-%d-%d-unknown" % (b_right + 1, a_right))
-                                                else:
-                                                    if a_type == "nothing":
-                                                        if a_left > b_left:
-                                                            return c_vars, False
-                                                        if b_i >= len(b_vars):
-                                                            c_vars.append("nothing-%d-%d-nothing" % (a_left, max(a_right, b_right)))
-                                                    else:
-                                                        if a_type == "deletion":
-                                                            if a_left > b_left and a_left <= b_right:
-                                                                return c_vars, False
-                                                        else:
-                                                            if a_left >= b_left and a_left <= b_right:
-                                                                return c_vars, False
-                                                        c_vars.append(a_var)
-                                                a_i += 1
-                                        else:
-                                            while b_i < len(b_vars):
-                                                b_var = b_vars[b_i]
-                                                b_type, b_pos, b_data = b_var.split('-')[:3]
-                                                b_left = int(b_pos)
-                                                if b_left > a_right:
-                                                    break                                            
-                                                if b_type == "unknown":
-                                                    b_right = int(b_data)
-                                                    if b_left < a_left:
-                                                        c_vars.append("unknown-%d-%d-unknown" % (b_left, min(b_right, a_right - 1)))
-                                                    elif b_right > a_right:
-                                                        c_vars.append("unknown-%d-%d-unknown" % (a_right + 1, b_right))
-                                                else:
-                                                    assert b_type != "nothing"
-                                                    if b_left >= a_left and b_left <= a_right:
-                                                        return c_vars, False
-                                                    else:
-                                                        assert b_left < a_left
-                                                        c_vars.append(b_var)
-                                                b_i += 1
-                                    elif a_type == "nothing":
-                                        if a_i == 0:
-                                            c_vars.append(a_var)
-                                            assert b_type != "unknown"
-                                            if b_left <= a_right:
-                                                return c_vars, False
-                                            a_i += 1
-                                            while a_i < len(a_vars):
-                                                a_var = a_vars[a_i]
-                                                if a_var == b_var:
-                                                    break
-                                                a_type, a_pos, a_data = a_var.split('-')[:3]
-                                                a_left = int(a_pos)
-                                                if a_left > b_right:
-                                                    return c_vars, False
-                                                c_vars.append(a_var)
-                                                a_i += 1
-                                        else:
-                                            a_i += 1
-                                            while b_i < len(b_vars):
-                                                b_var = b_vars[b_i]
-                                                b_type, b_pos, b_data = b_var.split('-')[:3]
-                                                b_left = int(b_pos)
-                                                relax = 0
-                                                if b_type == "deletion":
-                                                    relax = 10
-                                                if b_left + relax > a_right:
-                                                    break                                            
-                                                if b_type == "unknown":
-                                                    b_right = int(b_data)
-                                                    if b_right > a_right:
-                                                        c_vars.append("unknown-%d-%d-unknown" % (a_right + 1, b_right))
-                                                else:
-                                                    return c_vars, False
-                                                b_i += 1
-                                    else:
-                                        assert b_type == "nothing"
-                                        if b_i == 0:
-                                            assert False
-                                        else:
-                                            b_i += 1
-                                            while a_i < len(a_vars):
-                                                a_var = a_vars[a_i]
-                                                a_type, a_pos, a_data = a_var.split('-')[:3]
-                                                a_left = int(a_pos)                                                
-                                                if a_type == "nothing":
-                                                    a_right = int(a_data)
+                                                    a_right = int(a_pos)
+                                                if (a_type == "deletion" and a_right < b_right + 1) or \
+                                                        (a_type != "deletion" and a_right < b_right):
                                                     a_i += 1
-                                                    c_vars.append("nothing-%d-%d-nothing" % (a_left, max(a_right, b_right)))
-                                                    break
-                                                relax = 0
-                                                if a_type == "deletion":
-                                                    relax = 10                                                    
-                                                if a_left + relax > b_right:
-                                                    break                                            
-                                                if a_type == "unknown":
-                                                    a_right = int(a_data)
-                                                    if a_right > b_right:
-                                                        c_vars.append("unknown-%d-%d-unknown" % (b_right + 1, a_right))
+                                                    c_vars.append(a_var)
                                                 else:
-                                                    if a_type == "deletion" and a_left == b_left:
-                                                        c_vars.append(a_var)
-                                                    else:
-                                                        return c_vars, False
+                                                    break                                            
+                                        else:
+                                            while b_i < len(b_vars):
+                                                b_var = b_vars[b_i]
+                                                b_type, b_pos, b_data = b_var.split('-')[:3]
+                                                if b_type in ["unknown", "nothing"]:
+                                                    b_right = int(b_data)
+                                                else:
+                                                    b_right = int(b_pos)
+                                                addition = 0
+                                                if (b_type == "deletion" and b_pos < a_right + 1) or \
+                                                        (b_type != "deletion" and b_pos < a_right):
+                                                    b_i += 1
+                                                    c_vars.append(b_var)
+                                                else:
+                                                    break
+                                    elif a_type == "unknown" or b_type == "unknown":
+                                        if a_right < b_right:
+                                            if b_type == "unknown":
+                                                if a_right < b_left:
+                                                    return c_vars, False
                                                 a_i += 1
-                                    continue
-
-                                assert a_type != "nothing" and b_type != "nothing"
-                                if a_type == "unknown" and b_type == "unknown":
-                                    if (a_left <= b_left and a_right >= b_left) or \
-                                            (b_left <= a_left and b_right >= a_left):
-                                        c_vars.append("unknown-%d-%d-unknown" % (max(a_left, b_left), min(a_right, b_right)))
-                                    a_i += 1
-                                    b_i += 1
-                                    if a_right < b_right:
-                                        while a_i < len(a_vars):
-                                            a_var = a_vars[a_i]
-                                            a_type, a_pos, a_data = a_var.split('-')[:3]
-                                            if a_type in ["unknown", "nothing"]:
-                                                a_right = int(a_data)
-                                            else:
-                                                a_right = int(a_pos)
-                                            if (a_type == "deletion" and a_right < b_right + 1) or \
-                                                    (a_type != "deletion" and a_right < b_right):
-                                                a_i += 1
+                                                b_vars[b_i] = "unknown-%d-%d-unknown" % (a_right + 1, b_right)
                                                 c_vars.append(a_var)
                                             else:
-                                                break                                            
-                                    else:
-                                        while b_i < len(b_vars):
-                                            b_var = b_vars[b_i]
-                                            b_type, b_pos, b_data = b_var.split('-')[:3]
-                                            if b_type in ["unknown", "nothing"]:
-                                                b_right = int(b_data)
-                                            else:
-                                                b_right = int(b_pos)
-                                            addition = 0
-                                            if (b_type == "deletion" and b_pos < a_right + 1) or \
-                                                    (b_type != "deletion" and b_pos < a_right):
+                                                assert a_type == "unknown"
+                                                a_i += 1
+                                        else:
+                                            if a_type == "unknown":
+                                                if b_i == 0 or b_i + 1 == len(b_vars):
+                                                    return c_vars, False                                            
                                                 b_i += 1
-                                                c_vars.append(b_var)
+                                                if b_right  < a_right:
+                                                    a_vars[a_i] = "unknown-%d-%d-unknown" % (b_right + 1, a_right)
+                                                else:
+                                                    a_i += 1
+                                                c_vars.append(b_var)                                            
                                             else:
-                                                break
-                                elif a_type == "unknown" or b_type == "unknown":
-                                    if a_right < b_right:
-                                        if b_type == "unknown":
-                                            a_i += 1
-                                            b_vars[b_i] = "unknown-%d-%d-unknown" % (a_right + 1, b_right)
+                                                assert b_type == "unknown"
+                                                b_i += 1
+                                                if b_right > a_right:
+                                                    c_vars.append("unknown-%d-%d-unknown" % (max(a_right + 1, b_left), b_right))
+                                    else:
+                                        if a_left == b_left:
+                                            return c_vars, False
+                                        if a_left < b_left and b_i == 0:
                                             c_vars.append(a_var)
-                                        else:
-                                            assert a_type == "unknown"
                                             a_i += 1
-                                            c_vars.append("unknown-%d-%d-unknown" % (a_left, min(a_right, b_right - 1)))
-                                    else:
-                                        if a_type == "unknown":
-                                            if b_i == 0 or b_i + 1 == len(b_vars):
-                                                return c_vars, False                                            
-                                            b_i += 1
-                                            a_vars[a_i] = "unknown-%d-%d-unknown" % (b_right + 1, a_right)
-                                            c_vars.append(b_var)                                            
                                         else:
-                                            assert b_type == "unknown"
-                                            b_i += 1
-                                            c_vars.append("unknown-%d-%d-unknown" % (b_left, min(b_right, a_right - 1)))
-
-                                else:
-                                    if a_pos == b_pos:
-                                        return c_vars, False
-                                    if a_pos < b_pos and b_i == 0:
-                                        c_vars.append(a_var)
-                                        a_i += 1
-                                    else:
-                                        return c_vars, False
-
+                                            return c_vars, False
                                             
                         return c_vars, True
 
@@ -1299,15 +1251,12 @@ def HLA_typing(ex_path,
                             
                             # DK - for debugging purposes
                             # if c.find("single-1341-T-hv294,deletion-1395-17-hv305,single-1441-T-hv314") != -1:
-                            # if c.find("deletion-1395-hv305,single-1441-hv314") != -1 and c.find("single-1341-hv294") != -1:
-                            # """
-                            if not success:
+                            if c.find("single-2985-A-hv503,single-3097-G-hv519") != -1:
+                            # if not success:
                                 print "a:", a
                                 print "b:", b
                                 print "c:", ','.join(c_vars), success
-                            # if not success:
-                            #    sys.exit(1)
-                            # """
+                                sys.exit(1)
                             # if len(c_vars) >= 10:
                             #    sys.exit(1)
 
@@ -1336,7 +1285,7 @@ def HLA_typing(ex_path,
                                     alleles.append([b, i + 1])
                                 alleles.append([a, i + 1])                                        
                     return N_alleles
-                    
+
                 N_alleles = assemble_alleles(N_haplotype_list, len(test_HLA_names))
                 if verbose:
                     print "Number of N alleles: %d" % len(N_alleles)
