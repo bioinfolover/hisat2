@@ -460,7 +460,7 @@ def HLA_typing(ex_path,
                     else:
                         concordant = False
 
-                    NM, Zs, MD = "", "", ""
+                    NM, Zs, MD, NH = "", "", "", ""
                     for i in range(11, len(cols)):
                         col = cols[i]
                         if col.startswith("Zs"):
@@ -469,9 +469,14 @@ def HLA_typing(ex_path,
                             MD = col[5:]
                         elif col.startswith("NM"):
                             NM = int(col[5:])
+                        elif col.startswith("NH"):
+                            NH = int(col[5:])
 
                     if NM > num_mismatch:
                         continue
+
+                    if NH > 1:
+                        concordant = False
 
                     # DK - for debugging purposes
                     debug = False
@@ -622,18 +627,21 @@ def HLA_typing(ex_path,
 
                     def add_N_stat(N_vars, N_haplotypes, N_read_vars):
                         haplotype_str, haplotype_canonical_str = "", ""
-                        for N_read_var in N_read_vars:
-                            if N_read_var[0] == "gap":
-                                var_str = "gap-%d-%d" % (N_read_var[1], N_read_var[2])
+                        # Sanity check
+                        for i in range(len(N_read_vars)):
+                            N_read_var = N_read_vars[i]
+                            if N_read_var[0] == "nothing":
+                                assert i == 0 or i + 1 == len(N_read_vars)
+                            if N_read_var[0] in ["unknown", "nothing"]:
+                                var_str = "%s-%d-%d-%s" % (N_read_var[0], N_read_var[1], N_read_var[2], N_read_var[3])
                             else:
-                                var_type, var_pos, var_id = N_read_var
-                                var_str = "%s-%d-%s" % (var_type, var_pos, var_id)
+                                var_type, var_pos, var_data, var_id = N_read_var
+                                var_str = "%s-%d-%s-%s" % (var_type, var_pos, var_data, var_id)
                                 if var_str not in N_vars:
                                     N_vars[var_str] = 1
                                 else:
                                     N_vars[var_str] += 1
-
-                            if var_str.find("gap") == -1:
+                            if var_str.find("unknown") == -1 and var_str.find("nothing") == -1:
                                 if haplotype_canonical_str != "":
                                     haplotype_canonical_str += ","
                                 haplotype_canonical_str += var_str                                    
@@ -670,15 +678,15 @@ def HLA_typing(ex_path,
                                 if allele in ["DQA1*05:05:01:01", "DQA1*05:05:01:02"]:
                                     print allele, add, var_id
 
-                    def add_N_var(N_read_vars, N_read_var, gap_in_pair):
+                    def add_N_var(N_read_vars, N_read_var, unknown_in_pair):
                         if len(N_read_vars) == 0:
                             N_read_vars.append(N_read_var)
                         else:
-                            var_type, var_pos, var_id = N_read_vars[-1]
-                            var_type2, var_pos2, var_id2 = N_read_var
+                            var_type, var_pos, var_data, var_id = N_read_vars[-1]
+                            var_type2, var_pos2, var_data, var_id2 = N_read_var
                             if var_pos < var_pos2:
-                                if gap_in_pair:
-                                    N_read_vars.append(["gap"] + gap_in_pair)
+                                if unknown_in_pair:
+                                    N_read_vars.append(["unknown"] + unknown_in_pair + ["unknown"])
                                 N_read_vars.append(N_read_var)
 
                     # Decide which allele(s) a read most likely came from
@@ -704,11 +712,11 @@ def HLA_typing(ex_path,
                         cmp = cmp_list[cmp_i]
                         type = cmp[0]
                         length = cmp[2]
-                        gap_in_pair = []
+                        unknown_in_pair = []
                         if type in ["mismatch", "deletion", "insertion"]:
                             if concordant_second_read and first_diff:
                                 if prev_right_pos < left_pos:
-                                    gap_in_pair = [prev_right_pos, left_pos]
+                                    unknown_in_pair = [prev_right_pos, left_pos]
                             first_diff = False
 
                         if type == "match":
@@ -747,6 +755,16 @@ def HLA_typing(ex_path,
                                             print cmp, var_id, Links[var_id], -1
                                         add_count(var_id, -1)
                                 var_idx += 1
+                            if cmp_i == 0 or (cmp_i == 1 and cmp_list[0][0] == "soft"):
+                                if not concordant or not concordant_second_read:
+                                    if ref_pos > ref_pos + length - 1:
+                                        # DK - should fix the following
+                                        None
+                                    else:
+                                        add_N_var(N_read_vars, ["nothing", ref_pos, ref_pos + length - 1, "nothing"], [])                                    
+                            elif cmp_i + 1 == len(cmp_list) or (cmp_i + 2 == len(cmp_list) and cmp_list[-1][0] == "soft"):
+                                if not concordant or concordant_second_read:
+                                    add_N_var(N_read_vars, ["nothing", ref_pos, ref_pos + length - 1, "nothing"], [])
 
                             read_pos += length
                             ref_pos += length
@@ -775,7 +793,7 @@ def HLA_typing(ex_path,
                                             else:
                                                 add_count(var_id, 1)
                                                 known_var = True
-                                                add_N_var(N_read_vars, [var_type, ref_pos, var_id], gap_in_pair)
+                                                add_N_var(N_read_vars, [var_type, ref_pos, read_base, var_id], unknown_in_pair)
                                         # daehwan - check out if this routine is appropriate
                                         # else:
                                         #    add_count(var_id, -1)
@@ -783,7 +801,7 @@ def HLA_typing(ex_path,
 
                             if not known_var:
                                 novel_var_id = add_novel_var(Novel_vars, ["single", ref_pos, read_base])
-                                add_N_var(N_read_vars, ["single", ref_pos, novel_var_id], gap_in_pair)
+                                add_N_var(N_read_vars, ["single", ref_pos, read_base, novel_var_id], unknown_in_pair)
                                 
                             cmp_MD += ("%d%s" % (MD_match_len, ref_seq[ref_pos]))
                             MD_match_len = 0
@@ -812,12 +830,12 @@ def HLA_typing(ex_path,
                                                 print cmp, var_id, 1, Links[var_id]
                                             add_count(var_id, 1)
                                             known_var = True
-                                            add_N_var(N_read_vars, [var_type, ref_pos, var_id], gap_in_pair)
+                                            add_N_var(N_read_vars, [var_type, ref_pos, ins_seq, var_id], unknown_in_pair)
                                 var_idx += 1
 
                             if not known_var:
                                 novel_var_id = add_novel_var(Novel_vars, ["insertion", ref_pos, ins_seq])
-                                add_N_var(N_read_vars, ["insertion", ref_pos, novel_var_id], gap_in_pair)
+                                add_N_var(N_read_vars, ["insertion", ref_pos, ins_seq, novel_var_id], unknown_in_pair)
 
                             if cigar_match_len > 0:
                                 cmp_cigar_str += ("%dM" % cigar_match_len)
@@ -856,12 +874,12 @@ def HLA_typing(ex_path,
                                                 print ref_seq[var_pos - 10:var_pos], ref_seq[var_pos:var_pos+int(var_data)], ref_seq[var_pos+int(var_data):var_pos+int(var_data)+10]
                                             add_count(var_id, 1)
                                             known_var = True
-                                            add_N_var(N_read_vars, [var_type, ref_pos, var_id], gap_in_pair)
+                                            add_N_var(N_read_vars, [var_type, ref_pos, del_len, var_id], unknown_in_pair)
                                 var_idx += 1
 
                             if not known_var:
                                 novel_var_id = add_novel_var(Novel_vars, ["deletion", ref_pos, str(del_len)])
-                                add_N_var(N_read_vars, ["deleltion", ref_pos, novel_var_id], gap_in_pair)
+                                add_N_var(N_read_vars, ["deleltion", ref_pos, del_len, novel_var_id], unknown_in_pair)
 
                             if cigar_match_len > 0:
                                 cmp_cigar_str += ("%dM" % cigar_match_len)
@@ -893,7 +911,7 @@ def HLA_typing(ex_path,
                         print >> sys.stderr, "Error:", cigar_str, MD
                         print >> sys.stderr, "\tcomputed:", cmp_cigar_str, cmp_MD
                         print >> sys.stderr, "\tcmp list:", cmp_list
-                        assert False            
+                        assert False
 
                     prev_read_id = read_id
                     prev_exon = exon
@@ -911,7 +929,7 @@ def HLA_typing(ex_path,
                 var_count_avg = sum(N_vars.values()) / float(len(N_vars))
                 N_ignored_vars = set()
                 for N_var, count in N_vars.items():
-                    _var_type, _, _var_id = N_var.split('-')
+                    _var_type, _, _, _var_id = N_var.split('-')
                     if _var_id.find("novel"):
                         if _var_type in ["deleltion", "insertion"]:
                             if count < var_count_avg / 8.0:
@@ -937,22 +955,24 @@ def HLA_typing(ex_path,
                         cleaned_vars = []
                         cleaned_canonical_vars = []
                         for _var in _vars:
-                            if _var.find("gap") != -1:
+                            if _var.find("unknown") != -1 or _var.find("nothing") != -1:
                                 cleaned_vars.append(_var)
                             elif _var not in N_ignored_vars:
                                 cleaned_vars.append(_var)
                                 cleaned_canonical_vars.append(_var)
 
                         if len(cleaned_vars) > 0:
-                            if cleaned_vars[0].find("gap") != -1:
+                            if cleaned_vars[0].find("unknown") != -1:
                                 cleaned_vars = cleaned_vars[1:]
-                            elif cleaned_vars[-1].find("gap") != -1:
+                            elif cleaned_vars[-1].find("unknown") != -1:
                                 cleaned_vars = cleaned_vars[:1]
 
                         if len(cleaned_vars) > 0:
-                            assert cleaned_vars[0].find("gap") == -1 and cleaned_vars[-1].find("gap") == -1
+                            assert cleaned_vars[0].find("unknown") == -1 and cleaned_vars[-1].find("unknown") == -1
                             cleaned_haplotype = ','.join(cleaned_vars)
                             cleaned_canonical_haplotype = ','.join(cleaned_canonical_vars)
+                            if cleaned_canonical_haplotype == "":
+                                cleaned_canonical_haplotype = "nothing-0-0"
                             if cleaned_canonical_haplotype not in cleaned_N_haplotypes:
                                 cleaned_N_haplotypes[cleaned_canonical_haplotype] = [cleaned_haplotype]
                             else:
@@ -983,6 +1003,7 @@ def HLA_typing(ex_path,
                     b_vars = b.split(',')
                     assert len(b_vars) > 0
                     b_first_var, b_last_var = b_vars[0], b_vars[-1]
+                    
                     b_left = int(b_first_var.split('-')[1])
                     b_right = int(b_last_var.split('-')[1])
 
@@ -1007,6 +1028,7 @@ def HLA_typing(ex_path,
 
                 def assemble_alleles(N_haplotype_list, max_allele = 2):
                     def assemble_two_haplotypes(a_vars, b_vars):
+                        a_vars, b_vars = a_vars[:], b_vars[:]
                         c_vars = []
                         a_i, b_i = 0, 0
                         while a_i < len(a_vars) or b_i < len(b_vars):
@@ -1019,88 +1041,240 @@ def HLA_typing(ex_path,
                             else:
                                 a_var = a_vars[a_i]
                                 b_var = b_vars[b_i]
-                                if a_var.find("gap") != -1:
-                                    a_gap_left, a_gap_right = a_var.split('-')[1:3]
-                                    a_gap_left, a_gap_right = int(a_gap_left), int(a_gap_right)
-                                    a_was_gap = True
-                                    assert a_i + 1 < len(a_vars)
-                                    a_var = a_vars[a_i + 1]
-                                    a_i += 1                                    
-                                else:
-                                    a_was_gap = False
-                                if b_var.find("gap") != -1:
-                                    b_gap_left, b_gap_right = b_var.split('-')[1:3]
-                                    b_gap_left, b_gap_right = int(b_gap_left), int(b_gap_right)
-                                    b_was_gap = True
-                                    assert b_i + 1 < len(b_vars)
-                                    b_var = b_vars[b_i + 1]
-                                    b_i += 1
-                                else:
-                                    b_was_gap = False
-                                if a_was_gap and b_was_gap:
-                                    if a_gap_left > b_gap_right or a_gap_right < b_gap_left:
-                                        return [], False
-                                    c_vars.append("gap-%d-%d" % (max(a_gap_left, b_gap_left), min(a_gap_right, b_gap_right)))
-                                assert a_var.find("gap") == -1 and b_var.find("gap") == -1
                                 if a_var == b_var:
                                     a_i += 1
                                     b_i += 1
                                     c_vars.append(a_var)
+                                    continue
+
+                                a_type, a_pos, a_data, a_id = a_var.split('-')
+                                b_type, b_pos, b_data, b_id = b_var.split('-')
+                                a_pos, b_pos = int(a_pos), int(b_pos)
+                                if a_type == "deletion":
+                                    a_pos2 = a_pos + int(a_data) - 1
+                                elif a_type in ["unknown", "nothing"]:
+                                    a_pos2 = int(a_data)
                                 else:
-                                    a_pos = int(a_var.split('-')[1])
-                                    b_pos = int(b_var.split('-')[1])
-                                    if a_pos == b_pos:
-                                        return [], False
-                                    if a_was_gap or b_was_gap:
-                                        if a_pos < b_pos:
-                                            if not b_was_gap:
-                                                c_vars.append("gap-%d-%d" % (a_gap_left, a_gap_right))
+                                    a_pos2 = a_pos
+                                a_left, a_right = a_pos, a_pos2
+                                if b_type == "deletion":
+                                    b_pos2 = b_pos + int(b_data) - 1
+                                elif b_type in ["unknown", "nothing"]:
+                                    b_pos2 = int(b_data)
+                                else:
+                                    b_pos2 = b_pos
+                                b_left, b_right = b_pos, b_pos2
+
+                                if a_type == "nothing":
+                                    assert a_i == 0 or a_i + 1 == len(a_vars)
+                                if b_type == "nothing":
+                                    assert b_i == 0 or b_i + 1 == len(b_vars)
+                                if a_type == "nothing" or b_type == "nothing":
+                                    if a_type == "nothing" and b_type == "nothing":
+                                        if a_i == 0:
+                                            assert a_left <= b_left
+                                            c_vars.append("nothing-%d-%d-nothing" % (a_left, a_right))
+                                        else:
+                                            if b_i == 0:
+                                                if a_right < b_left:
+                                                    return c_vars, False
+                                                elif a_left <= b_left:
+                                                    c_vars.append("nothing-%d-%d-nothing" % (a_left, min(a_right, b_right)))
+                                            else:
+                                                assert b_i + 1 == len(b_vars)
+                                                c_vars.append("nothing-%d-%d-nothing" % (b_left, b_right))
+                                                break
+                                        a_i += 1
+                                        b_i += 1
+                                        if a_right < b_right:
+                                            while a_i < len(a_vars):
+                                                a_var = a_vars[a_i]
+                                                a_type, a_left, a_data = a_var.split('-')[:3]
+                                                a_left = int(a_left)
+                                                if a_left > b_right:
+                                                    break
+                                                if a_type in ["unknown", "nothing"]:
+                                                    a_right = int(a_data)
+                                                elif a_type == "deleltion":
+                                                    a_right = a_left + int(a_data) - 1
+                                                else:
+                                                    a_right = a_left
+                                                if a_type == "unknown":
+                                                    a_right = int(a_data)
+                                                    if a_left < b_left:
+                                                        c_vars.append("unknown-%d-%d-unknown" % (a_left, min(a_right, b_right - 1)))
+                                                    elif a_right > b_right:
+                                                        c_vars.append("unknown-%d-%d-unknown" % (b_right + 1, a_right))
+                                                else:
+                                                    if a_type == "nothing":
+                                                        if a_left > b_left:
+                                                            return c_vars, False
+                                                        if b_i >= len(b_vars):
+                                                            c_vars.append("nothing-%d-%d-nothing" % (a_left, max(a_right, b_right)))
+                                                    else:
+                                                        if a_type == "deletion":
+                                                            if a_left > b_left and a_left <= b_right:
+                                                                return c_vars, False
+                                                        else:
+                                                            if a_left >= b_left and a_left <= b_right:
+                                                                return c_vars, False
+                                                        c_vars.append(a_var)
+                                                a_i += 1
+                                        else:
+                                            while b_i < len(b_vars):
+                                                b_var = b_vars[b_i]
+                                                b_type, b_pos, b_data = b_var.split('-')[:3]
+                                                b_left = int(b_pos)
+                                                if b_left > a_right:
+                                                    break                                            
+                                                if b_type == "unknown":
+                                                    b_right = int(b_data)
+                                                    if b_left < a_left:
+                                                        c_vars.append("unknown-%d-%d-unknown" % (b_left, min(b_right, a_right - 1)))
+                                                    elif b_right > a_right:
+                                                        c_vars.append("unknown-%d-%d-unknown" % (a_right + 1, b_right))
+                                                else:
+                                                    assert b_type != "nothing"
+                                                    if b_left >= a_left and b_left <= a_right:
+                                                        return c_vars, False
+                                                    else:
+                                                        assert b_left < a_left
+                                                        c_vars.append(b_var)
+                                                b_i += 1
+                                    elif a_type == "nothing":
+                                        if a_i == 0:
+                                            c_vars.append(a_var)
+                                            assert b_type != "unknown"
+                                            if b_left <= a_right:
+                                                return c_vars, False
+                                            a_i += 1
                                             while a_i < len(a_vars):
                                                 a_var = a_vars[a_i]
                                                 if a_var == b_var:
-                                                    a_i += 1
-                                                    b_i += 1
-                                                    c_vars.append(a_var)
                                                     break
-                                                elif a_var.find("gap") != -1:
-                                                    a_i += 1
-                                                    c_vars.append(a_var)
-                                                else:
-                                                    a_pos = int(a_var.split('-')[1])
-                                                    if a_pos >= b_pos:
-                                                        return [], False
-                                                    a_i += 1
-                                                    c_vars.append(a_var)
+                                                a_type, a_pos, a_data = a_var.split('-')[:3]
+                                                a_left = int(a_pos)
+                                                if a_left > b_right:
+                                                    return c_vars, False
+                                                c_vars.append(a_var)
+                                                a_i += 1
                                         else:
-                                            if not a_was_gap:
-                                                c_vars.append("gap-%d-%d" % (b_gap_left, b_gap_right))
+                                            a_i += 1
                                             while b_i < len(b_vars):
                                                 b_var = b_vars[b_i]
-                                                if a_var == b_var:
-                                                    a_i += 1
-                                                    b_i += 1
-                                                    c_vars.append(b_var)
-                                                    break
-                                                elif b_var.find("gap") != -1:
-                                                    b_i += 1
-                                                    c_vars.append(b_var)
+                                                b_type, b_pos, b_data = b_var.split('-')[:3]
+                                                b_left = int(b_pos)
+                                                relax = 0
+                                                if b_type == "deletion":
+                                                    relax = 10
+                                                if b_left + relax > a_right:
+                                                    break                                            
+                                                if b_type == "unknown":
+                                                    b_right = int(b_data)
+                                                    if b_right > a_right:
+                                                        c_vars.append("unknown-%d-%d-unknown" % (a_right + 1, b_right))
                                                 else:
-                                                    b_pos = int(b_var.split('-')[1])
-                                                    if b_pos >= a_pos:
-                                                        return [], False
-                                                    b_i += 1
-                                                    c_vars.append(b_var)
-                                            if a_var != b_var:
-                                                return [], False
+                                                    return c_vars, False
+                                                b_i += 1
                                     else:
-                                        assert not a_was_gap and not b_was_gap
-                                        assert a_pos != b_pos
-                                        if a_pos < b_pos and b_i == 0:
-                                            c_vars.append(a_var)
-                                            a_i += 1
+                                        assert b_type == "nothing"
+                                        if b_i == 0:
+                                            assert False
                                         else:
-                                            return [], False
-                                            
+                                            b_i += 1
+                                            while a_i < len(a_vars):
+                                                a_var = a_vars[a_i]
+                                                a_type, a_pos, a_data = a_var.split('-')[:3]
+                                                a_left = int(a_pos)                                                
+                                                if a_type == "nothing":
+                                                    a_right = int(a_data)
+                                                    a_i += 1
+                                                    c_vars.append("nothing-%d-%d-nothing" % (a_left, max(a_right, b_right)))
+                                                    break
+                                                relax = 0
+                                                if a_type == "deletion":
+                                                    relax = 10                                                    
+                                                if a_left + relax > b_right:
+                                                    break                                            
+                                                if a_type == "unknown":
+                                                    a_right = int(a_data)
+                                                    if a_right > b_right:
+                                                        c_vars.append("unknown-%d-%d-unknown" % (b_right + 1, a_right))
+                                                else:
+                                                    if a_type == "deletion" and a_left == b_left:
+                                                        c_vars.append(a_var)
+                                                    else:
+                                                        return c_vars, False
+                                                a_i += 1
+                                    continue
+
+                                assert a_type != "nothing" and b_type != "nothing"
+                                if a_type == "unknown" and b_type == "unknown":
+                                    if (a_left <= b_left and a_right >= b_left) or \
+                                            (b_left <= a_left and b_right >= a_left):
+                                        c_vars.append("unknown-%d-%d-unknown" % (max(a_left, b_left), min(a_right, b_right)))
+                                    a_i += 1
+                                    b_i += 1
+                                    if a_right < b_right:
+                                        while a_i < len(a_vars):
+                                            a_var = a_vars[a_i]
+                                            a_type, a_pos, a_data = a_var.split('-')[:3]
+                                            if a_type in ["unknown", "nothing"]:
+                                                a_right = int(a_data)
+                                            else:
+                                                a_right = int(a_pos)
+                                            if (a_type == "deletion" and a_right < b_right + 1) or \
+                                                    (a_type != "deletion" and a_right < b_right):
+                                                a_i += 1
+                                                c_vars.append(a_var)
+                                            else:
+                                                break                                            
+                                    else:
+                                        while b_i < len(b_vars):
+                                            b_var = b_vars[b_i]
+                                            b_type, b_pos, b_data = b_var.split('-')[:3]
+                                            if b_type in ["unknown", "nothing"]:
+                                                b_right = int(b_data)
+                                            else:
+                                                b_right = int(b_pos)
+                                            addition = 0
+                                            if (b_type == "deletion" and b_pos < a_right + 1) or \
+                                                    (b_type != "deletion" and b_pos < a_right):
+                                                b_i += 1
+                                                c_vars.append(b_var)
+                                            else:
+                                                break
+                                elif a_type == "unknown" or b_type == "unknown":
+                                    if a_right < b_right:
+                                        if b_type == "unknown":
+                                            a_i += 1
+                                            b_vars[b_i] = "unknown-%d-%d-unknown" % (a_right + 1, b_right)
+                                            c_vars.append(a_var)
+                                        else:
+                                            assert a_type == "unknown"
+                                            a_i += 1
+                                            c_vars.append("unknown-%d-%d-unknown" % (a_left, min(a_right, b_right - 1)))
+                                    else:
+                                        if a_type == "unknown":
+                                            if b_i == 0 or b_i + 1 == len(b_vars):
+                                                return c_vars, False                                            
+                                            b_i += 1
+                                            a_vars[a_i] = "unknown-%d-%d-unknown" % (b_right + 1, a_right)
+                                            c_vars.append(b_var)                                            
+                                        else:
+                                            assert b_type == "unknown"
+                                            b_i += 1
+                                            c_vars.append("unknown-%d-%d-unknown" % (b_left, min(b_right, a_right - 1)))
+
+                                else:
+                                    if a_pos == b_pos:
+                                        return c_vars, False
+                                    if a_pos < b_pos and b_i == 0:
+                                        c_vars.append(a_var)
+                                        a_i += 1
+                                    else:
+                                        return c_vars, False
+
                                             
                         return c_vars, True
 
@@ -1124,13 +1298,27 @@ def HLA_typing(ex_path,
                             c = ','.join(c_vars)
                             
                             # DK - for debugging purposes
-                            """
-                            if c.find("deletion-1395-hv305,single-1441-hv314") != -1:
+                            # if c.find("single-1341-T-hv294,deletion-1395-17-hv305,single-1441-T-hv314") != -1:
+                            # if c.find("deletion-1395-hv305,single-1441-hv314") != -1 and c.find("single-1341-hv294") != -1:
+                            # """
+                            if not success:
                                 print "a:", a
                                 print "b:", b
                                 print "c:", ','.join(c_vars), success
-                                sys.exit(1)
-                            """
+                            # if not success:
+                            #    sys.exit(1)
+                            # """
+                            # if len(c_vars) >= 10:
+                            #    sys.exit(1)
+
+                            # Sanity check
+                            for c_var in c_vars[1:-1]:
+                                if c_var.find("nothing") != -1:
+                                    print >> sys.stderr, "Error containing nothing in intermediate elements!"
+                                    print >> sys.stderr, "a:", a
+                                    print >> sys.stderr, "b:", b
+                                    print >> sys.stderr, "c:", c
+                                    sys.exit(1)
                             
                             if success:
                                 alleles.append([c, i + 1])
@@ -1138,10 +1326,12 @@ def HLA_typing(ex_path,
                                 # DK - temporary
                                 if len(alleles) == 0:
                                     # DK - for debugging purposes
+                                    """
                                     print "a:", a
                                     print "b:", b
                                     print "c:", c, success
                                     sys.exit(1)
+                                    """
                                     
                                     alleles.append([b, i + 1])
                                 alleles.append([a, i + 1])                                        
@@ -1165,9 +1355,9 @@ def HLA_typing(ex_path,
                             calculated_var_ids = []
                             calculated_vars = set()
                             for _var in _vars:
-                                if _var.find("gap") != -1:
+                                if _var.find("unknown") != -1 or _var.find("nothing") != -1:
                                     continue
-                                _var_type, _var_pos, _var_id = _var.split('-')
+                                _var_type, _var_pos, _var_data, _var_id = _var.split('-')
                                 calculated_var_ids.append(_var_id)
                                 calculated_vars.add("%s-%s" % (_var_type, _var_pos))
 
@@ -1178,7 +1368,7 @@ def HLA_typing(ex_path,
                                 for _var_id in Var_list_default[gene]:
                                     _var_pos, _var_id = _var_id
                                     if test_allele_name in Links_default[_var_id]:
-                                        _var_type, _var_pos, _ = Vars_default[gene][_var_id]
+                                        _var_type, _var_pos, _= Vars_default[gene][_var_id]
                                         cmp_vars.add("%s-%d" % (_var_type, _var_pos))
                                 tmp_num_common = len(calculated_vars.intersection(cmp_vars))
                                 if num_common < tmp_num_common:
