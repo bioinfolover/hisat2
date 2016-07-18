@@ -33,13 +33,9 @@ def simulate_reads(HLAs,
     HLA_reads_1, HLA_reads_2 = [], []
     for test_HLA_names in test_HLA_list:
         gene = test_HLA_names[0].split('*')[0]
-        # ref_allele = refHLAs[gene]
-        # ref_seq = HLAs[gene][ref_allele]
 
         # Simulate reads from two HLA alleles
-        # DK - for debugging purposes
-        # def simulate_reads_impl(seq, simulate_interval = 1, frag_len = 250, read_len = 100):
-        def simulate_reads_impl(seq, simulate_interval = 1, frag_len = 350, read_len = 150):
+        def simulate_reads_impl(seq, simulate_interval = 1, frag_len = 250, read_len = 100):
             comp_table = {'A':'T', 'C':'G', 'G':'C', 'T':'A'}
             reads_1, reads_2 = [], []
             for i in range(0, len(seq) - frag_len + 1, simulate_interval):
@@ -629,9 +625,6 @@ def HLA_typing(ex_path,
 
                     def add_N_stat(N_vars, N_haplotypes, N_read_vars):
                         haplotype_str, haplotype_canonical_str = "", ""
-                        if len(N_read_vars) == 1:
-                            if N_read_vars[0][0] == "nothing":
-                                return
                         # Sanity check
                         for i in range(len(N_read_vars)):
                             N_read_var = N_read_vars[i]
@@ -768,7 +761,7 @@ def HLA_typing(ex_path,
                                     else:
                                         if length > 20:
                                             add_N_var(N_read_vars, ["nothing", ref_pos + 10, ref_pos + 10, "nothing"], [])                                    
-                            elif cmp_i + 1 == len(cmp_list) or (cmp_i + 2 == len(cmp_list) and cmp_list[-1][0] == "soft"):
+                            if cmp_i + 1 == len(cmp_list) or (cmp_i + 2 == len(cmp_list) and cmp_list[-1][0] == "soft"):
                                 if not concordant or concordant_second_read:
                                     if length > 20:
                                         add_N_var(N_read_vars, ["nothing", ref_pos + length - 1 - 10, ref_pos + length - 1 - 10, "nothing"], [])
@@ -912,6 +905,7 @@ def HLA_typing(ex_path,
                     if cigar_match_len > 0:
                         cmp_cigar_str += ("%dM" % cigar_match_len)
                     cmp_MD += ("%d" % MD_match_len)
+                    # Sanity check
                     if read_pos != len(read_seq) or \
                             cmp_cigar_str != cigar_str or \
                             cmp_MD != MD:
