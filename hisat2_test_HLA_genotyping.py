@@ -25,6 +25,7 @@ import inspect, random
 import math
 from argparse import ArgumentParser, FileType
 
+
 """
 """
 def simulate_reads(HLAs,
@@ -628,9 +629,9 @@ def HLA_typing(ex_path,
                         # Sanity check
                         for i in range(len(N_read_vars)):
                             N_read_var = N_read_vars[i]
-                            if N_read_var[0] == "nothing":
+                            if N_read_var[0] in ["left", "right"]:
                                 assert i == 0 or i + 1 == len(N_read_vars)
-                            if N_read_var[0] in ["unknown", "nothing"]:
+                            if N_read_var[0] in ["unknown", "left", "right"]:
                                 var_str = "%s-%d-%d-%s" % (N_read_var[0], N_read_var[1], N_read_var[2], N_read_var[3])
                             else:
                                 var_type, var_pos, var_data, var_id = N_read_var
@@ -639,7 +640,7 @@ def HLA_typing(ex_path,
                                     N_vars[var_str] = 1
                                 else:
                                     N_vars[var_str] += 1
-                            if var_str.find("unknown") == -1 and var_str.find("nothing") == -1:
+                            if var_str.find("unknown") == -1 and var_str.find("left") == -1 and var_str.find("right") == -1:
                                 if haplotype_canonical_str != "":
                                     haplotype_canonical_str += ","
                                 haplotype_canonical_str += var_str                                    
@@ -760,11 +761,11 @@ def HLA_typing(ex_path,
                                         None
                                     else:
                                         if length > 20:
-                                            add_N_var(N_read_vars, ["nothing", ref_pos + 10, ref_pos + 10, "nothing"], [])                                    
+                                            add_N_var(N_read_vars, ["left", ref_pos + 10, ref_pos + 10, "left"], [])                                    
                             if cmp_i + 1 == len(cmp_list) or (cmp_i + 2 == len(cmp_list) and cmp_list[-1][0] == "soft"):
                                 if not concordant or concordant_second_read:
                                     if length > 20:
-                                        add_N_var(N_read_vars, ["nothing", ref_pos + length - 1 - 10, ref_pos + length - 1 - 10, "nothing"], [])
+                                        add_N_var(N_read_vars, ["right", ref_pos + length - 1 - 10, ref_pos + length - 1 - 10, "right"], [])
 
                             read_pos += length
                             ref_pos += length
@@ -956,7 +957,9 @@ def HLA_typing(ex_path,
                         cleaned_vars = []
                         cleaned_canonical_vars = []
                         for _var in _vars:
-                            if _var.find("unknown") != -1 or _var.find("nothing") != -1:
+                            if _var.find("unknown") != -1 or \
+                                    _var.find("left") != -1 or \
+                                    _var.find("right") != -1:
                                 cleaned_vars.append(_var)
                             elif _var not in N_ignored_vars:
                                 cleaned_vars.append(_var)
@@ -1026,6 +1029,8 @@ def HLA_typing(ex_path,
                     print "Number of haplotypes: %d" % len(N_haplotypes)
                     for N_haplotype in v_N_haplotype_list:
                         print N_haplotype, len(N_haplotypes[N_haplotype])
+                        # for read_haplotype in N_haplotypes[N_haplotype]:
+                        #    print "\t", read_haplotype
 
                 def assemble_alleles(N_haplotype_list, max_allele = 2):
                     const_deletion_relax = 10
@@ -1039,7 +1044,7 @@ def HLA_typing(ex_path,
                         else:
                             var_right = var_left
                         assert var_left <= var_right
-                        if var_type == "nothing":
+                        if var_type in ["left", "right"]:
                             assert var_left == var_right
                         return var_type, var_left, var_right
                     
@@ -1066,29 +1071,33 @@ def HLA_typing(ex_path,
                                 a_type, a_left, a_right = get_var_info(a_var)
                                 b_type, b_left, b_right = get_var_info(b_var)
 
-                                if a_type == "nothing":
-                                    assert a_i == 0 or a_i + 1 == len(a_vars)
-                                if b_type == "nothing":
-                                    assert b_i == 0 or b_i + 1 == len(b_vars)
+                                if a_type == "left":
+                                    assert a_i == 0
+                                elif a_type == "right":
+                                    assert a_i + 1 == len(a_vars)
+                                if b_type == "left":
+                                    assert b_i == 0
+                                elif b_type == "right":
+                                    assert b_i + 1 == len(b_vars)
                                                 
-                                if a_type == "nothing":
-                                    if a_i == 0:
+                                if a_type in ["left", "right"]:
+                                    if a_type == "left":
                                         assert a_left <= b_left
-                                        c_vars.append("nothing-%d-%d-nothing" % (a_left, a_left))
+                                        c_vars.append("left-%d-%d-left" % (a_left, a_left))
                                         a_i += 1
                                         while a_i < len(a_vars):
                                             a_var = a_vars[a_i]
                                             a_type, a_left, a_right = get_var_info(a_var)
                                             if a_right < b_left:
                                                 if a_i + 1 == len(a_vars):
-                                                    if b_type == "nothing":
+                                                    if b_type in ["left", "right"]:
                                                         b_i += 1
                                                         break
                                                     break
                                                 else:
                                                     c_vars.append(a_var)
                                             else:
-                                                if b_type == "nothing":
+                                                if b_type == "left":
                                                     if a_type == "unknown":
                                                         if a_left < b_left and a_right > b_left:
                                                             a_vars[a_i] = "unknown-%d-%d-unknown" % (b_left, a_right)
@@ -1102,17 +1111,17 @@ def HLA_typing(ex_path,
                                                 break
                                             a_i += 1
                                     else:
+                                        assert a_type == "right"
                                         a_i += 1
-                                        assert a_i == len(a_vars)
                                         while b_i < len(b_vars):
                                             b_var = b_vars[b_i]
                                             b_type, b_left, b_right = get_var_info(b_var)
-                                            if b_type == "nothing":
-                                                if b_i == 0:
+                                            if b_type in ["left", "right"]:
+                                                if b_type == "left":
                                                     if a_right < b_left:
                                                         return c_vars, False
                                                 else:
-                                                    c_vars.append("nothing-%d-%d-nothing" % (b_right, b_right))
+                                                    c_vars.append("right-%d-%d-right" % (b_right, b_right))
                                             elif b_type == "unknown":
                                                 if b_left < a_right and b_right > a_right:
                                                     c_vars.append("unknown-%d-%d-unknown" % (a_right + 1, b_right))
@@ -1123,12 +1132,13 @@ def HLA_typing(ex_path,
                                                 else:
                                                     break
                                             b_i += 1
-                                elif b_type == "nothing":
-                                    if b_i == 0:
+                                elif b_type in ["left", "right"]:
+                                    if b_type == "left":
+                                        # DK - to be implemented?
                                         assert False
                                     else:
+                                        assert b_type == "right"
                                         b_i += 1
-                                        assert b_i == len(b_vars)
                                         while a_i < len(a_vars):
                                             a_var = a_vars[a_i]
                                             a_type, a_left, a_right = get_var_info(a_var)
@@ -1151,7 +1161,7 @@ def HLA_typing(ex_path,
                                             a_i += 1
                                         
                                 else:
-                                    assert a_type != "nothing" and b_type != "nothing"
+                                    assert a_type not in ["left", "right"] and b_type not in ["left", "right"]
                                     if a_type == "unknown" and b_type == "unknown":
                                         if (a_left <= b_left and a_right >= b_left) or \
                                                 (b_left <= a_left and b_right >= a_left):
@@ -1161,11 +1171,7 @@ def HLA_typing(ex_path,
                                         if a_right < b_right:
                                             while a_i < len(a_vars):
                                                 a_var = a_vars[a_i]
-                                                a_type, a_pos, a_data = a_var.split('-')[:3]
-                                                if a_type in ["unknown", "nothing"]:
-                                                    a_right = int(a_data)
-                                                else:
-                                                    a_right = int(a_pos)
+                                                a_type, a_left, a_right = get_var_info(a_var)
                                                 if (a_type == "deletion" and a_right < b_right + 1) or \
                                                         (a_type != "deletion" and a_right < b_right):
                                                     a_i += 1
@@ -1175,14 +1181,9 @@ def HLA_typing(ex_path,
                                         else:
                                             while b_i < len(b_vars):
                                                 b_var = b_vars[b_i]
-                                                b_type, b_pos, b_data = b_var.split('-')[:3]
-                                                if b_type in ["unknown", "nothing"]:
-                                                    b_right = int(b_data)
-                                                else:
-                                                    b_right = int(b_pos)
-                                                addition = 0
-                                                if (b_type == "deletion" and b_pos < a_right + 1) or \
-                                                        (b_type != "deletion" and b_pos < a_right):
+                                                b_type, b_left, b_right = get_var_info(b_var)
+                                                if (b_type == "deletion" and b_right < a_right + 1) or \
+                                                        (b_type != "deletion" and b_right < a_right):
                                                     b_i += 1
                                                     c_vars.append(b_var)
                                                 else:
@@ -1244,9 +1245,7 @@ def HLA_typing(ex_path,
                             c = ','.join(c_vars)
                             
                             # DK - for debugging purposes
-                            # if c.find("single-1341-T-hv294,deletion-1395-17-hv305,single-1441-T-hv314") != -1:
-                            if c.find("single-2985-A-hv503,single-3097-G-hv519") != -1:
-                            # if not success:
+                            if c.find("single-245-T-hv54,single-158-A-hv49") != -1:
                                 print "a:", a
                                 print "b:", b
                                 print "c:", ','.join(c_vars), success
@@ -1256,8 +1255,9 @@ def HLA_typing(ex_path,
 
                             # Sanity check
                             for c_var in c_vars[1:-1]:
-                                if c_var.find("nothing") != -1:
-                                    print >> sys.stderr, "Error containing nothing in intermediate elements!"
+                                if c_var.find("left") != -1 or \
+                                        c_var.find("right") != -1:
+                                    print >> sys.stderr, "Error containing left or right in intermediate elements!"
                                     print >> sys.stderr, "a:", a
                                     print >> sys.stderr, "b:", b
                                     print >> sys.stderr, "c:", c
@@ -1298,7 +1298,9 @@ def HLA_typing(ex_path,
                             calculated_var_ids = []
                             calculated_vars = set()
                             for _var in _vars:
-                                if _var.find("unknown") != -1 or _var.find("nothing") != -1:
+                                if _var.find("unknown") != -1 or \
+                                        _var.find("left") != -1 or \
+                                        _var.find("right") != -1:
                                     continue
                                 _var_type, _var_pos, _var_data, _var_id = _var.split('-')
                                 calculated_var_ids.append(_var_id)
