@@ -39,14 +39,16 @@ from argparse import ArgumentParser, FileType
 #
 # 3) Sort alignments with my methods hisat2_sort_alignments.py
 #
-#    time ../../../hisat2 -p 3 -x ../../indexes/HISAT2/genome -U 20M_1.fq | ./hisat2_sort_alignments.py -p 3
+#    time ../../../hisat2 -p 3 -x ../../indexes/HISAT2/genome -U 20M_1.fq | ./hisat2_sort_alignments.py -p 3 > alignment.sam
+#    real 12m20.561s
+#    time ../../../hisat2 -p 3 -x ../../indexes/HISAT2/genome -U 20M_1.fq | ./hisat2_sort_alignments.py -p 3 | samtools view -bS > alignment.bam
 #    samtools view -bS -
 
 
 """
 """
 def sort_alignments(input_fname,
-                    temp_fname,
+                    base_fname,
                     threads,
                     interval_size,
                     verbose):
@@ -70,9 +72,9 @@ def sort_alignments(input_fname,
             first_alignment = False
             seq_list.append(["unmapped", 0])
             for seq_name, seq_length in seq_list:
-                tmp_fname = "%s.%s.tmp.sam" % (temp_fname, seq_name)
-                tmp_file = open(temp_fname, 'w')
-                seq2file[seq_name] = [temp_fname, tmp_file]
+                tmp_fname = "%s.%s.tmp.sam" % (base_fname, seq_name)
+                tmp_file = open(tmp_fname, 'w')
+                seq2file[seq_name] = [tmp_fname, tmp_file]
             
         read_name, flag, seq_name, pos = line.split()[:4]
         flag, pos = int(flag), int(pos)
@@ -81,42 +83,77 @@ def sort_alignments(input_fname,
         else:
             print >> seq2file[seq_name][1], line,
 
-    for seq_name, tmp_file in seq2file.items():
+    for seq_name, seq_length in seq_list:
+        tmp_file = seq2file[seq_name][1]
+        tmp_file.close()
 
-    for line in header:
-        print line,
-
-
-    for seq_name, tmp_file in seq2
     # Sort alignments
-    """
-    sambam_cmd = ["sort",
-                  "view",
-                  "-bS",
-                  "-"]
-    sambam_proc = subprocess.Popen(sambam_cmd,
-                                   stdin=align_proc.stdout,
-                                   stdout=open("hla_input_unsorted.bam", 'w'),
-                                   stderr=open("/dev/null", 'w'))
-    sambam_proc.communicate()
-    bamsort_cmd = ["samtools",
-                   "sort",
-                   "hla_input_unsorted.bam",
-                   "-o", "hla_input.bam"]
-    bamsort_proc = subprocess.Popen(bamsort_cmd,
-                                    stderr=open("/dev/null", 'w'))
-    bamsort_proc.communicate()
+    pids = [0 for i in range(threads)]
+    for seq_name, seq_length in seq_list:
+        tmp_fname = seq2file[seq_name][0]
+        if seq_name == "unmapped":
+            continue
 
-    bamindex_cmd = ["samtools",
-                    "index",
-                    "hla_input.bam"]
-    bamindex_proc = subprocess.Popen(bamindex_cmd,
-                                     stderr=open("/dev/null", 'w'))
-    bamindex_proc.communicate()
-    """
-
-    
+        def work(sam_fname,
+                 sorted_sam_fname):
+            sort_cmd = ["sort",
+                        "-k 4,4",
+                        "-n",
+                        sam_fname]
+            sort_proc = subprocess.Popen(sort_cmd,
+                                         stdout=open(sorted_sam_fname, 'w'),
+                                         stderr=open("/dev/null", 'w'))
+            sort_proc.communicate()
+            os.remove(sam_fname)
         
+        def parallel_work(pids,
+                          work,
+                          sam_fname,
+                          sorted_sam_fname):
+            child = -1
+            for i in range(len(pids)):
+                if pids[i] == 0:
+                    child = i
+                    break
+
+            while child == -1:
+                status = os.waitpid(0, 0)
+                for i in range(len(pids)):
+                    if status[0] == pids[i]:
+                        child = i
+                        pids[i] = 0
+                        break
+
+            child_id = os.fork()
+            if child_id == 0:
+                work(sam_fname,
+                     sorted_sam_fname)
+                os._exit(os.EX_OK)
+            else:
+                pids[child] = child_id
+            
+        if threads <= 1:
+            work(tmp_fname,
+                 tmp_fname + ".sorted")
+        else:
+            parallel_work(pids,
+                          work,
+                          tmp_fname,
+                          tmp_fname + ".sorted")        
+    if threads > 1:
+        for pid in pids:
+            if pid > 0:
+                os.waitpid(pid, 0)
+
+    for seq_name, seq_length in seq_list:
+        tmp_fname = seq2file[seq_name][0]
+        if seq_name != "unmapped":
+            tmp_fname += ".sorted"
+        for line in open(tmp_fname):
+            print line,
+        os.remove(tmp_fname)
+
+                
 """
 """
 if __name__ == '__main__':
@@ -127,11 +164,11 @@ if __name__ == '__main__':
                         type=str,
                         default="-",
                         help="Input SAM file name (default: -, which is stdin)")
-    parser.add_argument("--temp-fname",
-                        dest="temp_fname",
+    parser.add_argument("--base-fname",
+                        dest="base_fname",
                         type=str,
                         default="test_hisat2",
-                        help="Temporary file name header")
+                        help="Base file name")
     parser.add_argument("-p/--threads",
                         dest="threads",
                         type=int,
@@ -149,7 +186,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     sort_alignments(args.input_fname,
-                    args.temp_fname,
+                    args.base_fname,
                     args.threads,
                     args.interval_size,
                     args.verbose)
