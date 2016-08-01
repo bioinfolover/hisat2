@@ -59,7 +59,9 @@ def checkRead(read, position, sequence, forward ):
 """
 def simulate_reads(HLAs,
                    test_HLA_list,
-                   simulate_interval):
+                   simulate_interval,
+                   error_rate = -1):
+                   
     HLA_reads_1, HLA_reads_2 = [], []
     for test_HLA_names in test_HLA_list:
         gene = test_HLA_names[0].split('*')[0]
@@ -81,12 +83,31 @@ def simulate_reads(HLAs,
                         read_2 += s
                 reads_2.append(read_2)
             return reads_1, reads_2
+        # Simulate error in reads
+        def simulate_error(reads, error_rate):
+            newreads = []
+            n_list = ['A','T','C','G']
+            for read in reads:
+                newread = ""
+                for c in read:
+                    if (error_rate >= random.uniform(0,1)):
+                        i = n_list.index(c)
+                        r = range(0,i) + range(i+1,4)
+                        r = random.choice(r)
+                        c = n_list[r]
+                    newread += c
+                newreads.append(newread)
+            return newreads
 
         for test_HLA_name in test_HLA_names:
             HLA_seq = HLAs[gene][test_HLA_name]
             tmp_reads_1, tmp_reads_2 = simulate_reads_impl(HLA_seq, simulate_interval)
-            HLA_reads_1 += tmp_reads_1
-            HLA_reads_2 += tmp_reads_2
+            if error_rate <= 0:
+                HLA_reads_1 += tmp_reads_1
+                HLA_reads_2 += tmp_reads_2
+            else:
+                HLA_reads_1 += simulate_error(tmp_reads_1, error_rate)
+                HLA_reads_2 += simulate_error(tmp_reads_2, error_rate)
 
     # Write reads into a fasta read file
     def write_reads(reads, idx, label = ""):
@@ -455,10 +476,6 @@ def HLA_typing(ex_path,
                 # Cigar regular expression
                 cigar_re = re.compile('\d+\w')
                 for line in alignview_proc.stdout:
-                    
-                    #Just checking!
-                    #print line
-                    
                     cols = line.strip().split()
                     read_id, flag, chr, pos, mapQ, cigar_str = cols[:6]
                     read_seq, qual = cols[9], cols[10]
@@ -965,26 +982,38 @@ def HLA_typing(ex_path,
             #print "Testing!!!"
             #print HLA_prob[0]
             
-           
+            #if index_type == "graph" and len(test_HLA_names) == 2:
+            #    HLA_prob = joint_abundance(HLA_cmpt, HLA_lengths[gene])
+                #if(len(HLA_prob) > 0):
+            #    print HLA_prob[0][0].split('-')
+                
+                
             if index_type == "graph" and detect_allele:
-                num_alleles = 1
+                #num_alleles = 1
                 alleles_found = []
+                
                 try:
                     os.mkdir("./Genotyping".format(i))
                 except:
                     pass  
                 
-                                
-                for i in range(0,num_alleles):
-                    alleles_found.append(HLA_prob[i][0])        
                     
-                    allele_file = {}
-                    allele_alignment_data = {}
-                for allele_det in alleles_found:
+                if len(test_HLA_names) == 2:
+                    HLA_prob_temp = joint_abundance(HLA_cmpt, HLA_lengths[gene])
+                    alleles_found = HLA_prob_temp[0][0].split('-')
+                else:
+                    alleles_found.append(HLA_prob[0][0])
                 
+                print alleles_found
+                allele_file = {}
+                allele_alignment_data = {}
+                for allele_det in alleles_found:
+                    #print HLAs
                     gene_name = allele_det.split('*')[0]
                     allele_sequence = HLAs[gene_name][allele_det]
-                    allele_alignment_data[allele_det] = {}*HLA_lengths[gene_name][allele_det]
+                    allele_alignment_data[allele_det] = []
+                    for i in range(0,HLA_lengths[gene_name][allele_det]):
+                        allele_alignment_data[allele_det].append({})
                     
                     first_time = False
                     try:
@@ -1035,10 +1064,13 @@ def HLA_typing(ex_path,
                                     "-S", "./Genotyping/{0}/Output".format(allele_det)]
                     if verbose:
                         print >> sys.stderr, ' '.join(aligner_cmd)
-                        align_proc = subprocess.Popen(aligner_cmd,
-                                                      stdout=subprocess.PIPE,
-                                                      stderr=open("/dev/null", 'w'))
-                                                      
+                    align_proc = subprocess.Popen(aligner_cmd,
+                                                  stdout=subprocess.PIPE,
+                                                  stderr=open("/dev/null", 'w'))
+                                                  
+                                                  
+                    align_proc.communicate()
+                    #print "Alignment Complete"                   
                     
                     allele_file[allele_det] = open("./Genotyping/{0}/Output".format(allele_det),"r")
                     allele_file[allele_det].readline()
@@ -1046,90 +1078,154 @@ def HLA_typing(ex_path,
                     allele_file[allele_det].readline()
             
             
-            read_count = 0
-            readsleft = True
+                read_count = 0
+                readsleft = True
             
-            #May need to check 'M' sites for mismatches!!!
-            def best_read(read_data, allele_list):
-                best = allele_list[0]
-                b_matches = 0
-                
-                if len(allele_list) == 1
+                #May need to check 'M' sites for mismatches!!!
+                def best_read(read_data, allele_list):
+                    best = [allele_list[0]]
+                    b_matches = 0
+                    
+                    if len(allele_list) == 1:
+                        return best
+                    cigar_re = re.compile('\d+\w')
+                    
+                    for allele in allele_list:
+                        if(len(read_data[allele]) < 6):
+                            continue
+                            
+                        cigar_data = cigar_re.findall(read_data[allele][5])
+                        c_matches = 0
+                        for x in cigar_data:
+                            if 'M' in x:
+                                c_matches += int(x.split('M')[0])
+		                    
+                            if 'D' in x:
+                                c_matches -= int(x.split('D')[0])
+                        if best[0] == allele_list[0]:
+                            b_matches = c_matches
+                        elif (c_matches == b_matches):
+                            best.append(allele)
+                        elif (c_matches > b_matches):
+                            b_matches = c_matches
+                            best = [allele]
                     return best
-                cigar_re = re.compile('\d+\w')
-                
-                for allele in allele_list:
                     
-                    cigar_data = cigar_re.findall(read_data[allele][5])
-)                   for x in cigars:
-	                    if 'M' in x:
-		                c_matches += int(x.split('M')[0])
-		                if 'D' in x:
-		                c_matches -= int(x.split('D')[0])
-                    if best == allele_list[0]:
-                        b_matches = c_matches
-                    else if (c_matches > b_matches):
-                        b_matches = c_matches
-                        best = allele
-                return best
-                
-            def updateRef(reference_allele, pos, seq):
-                if reference_allele[pos] == None:
-                    reference_allele[pos] = {}
-                
-                if(not seq in reference_allele[pos]):
-                    reference_allele[pos][seq] = 1
-                else:
-                    reference_allele[pos][seq] += 1
-                
-            def extract_sequence(read_seq, cigars, pos, reference_allele):
-                current_pos = pos
-                count = 0
-                #while( current < reference_allele && count < read_length):
-                 for cigar in cigars:
-                    num, score = filter(None,re.split('(\d+)',cigar))
-                    if score = 'M' or 'S' or 'H' or '=' or 'X':
-                        for i in range(0,num):
-                            updateRef(reference_allele, current_pos + i, read_seq[count + i])
-                        current_pos += num
-                        count += num
-                    if score = 'D':
-                        for i in range(0,num):
-                            updateRef(reference_allele, current_pos + i, 'D')
-                        current_pos += num
-                        count += num
-                    if score = 'I':
-                        updateRef(reference_allele, current_pos, read_seq[count:count+num]
-                        count += num
-                        current_pos += num
+                def updateRef(reference_allele, pos, seq):
+                    if(pos >= len(reference_allele)):
+                        return False
+                    if reference_allele[pos] == None:
+                        reference_allele[pos] = {}
+                    
+                    if(not seq in reference_allele[pos]):
+                        reference_allele[pos][seq] = 1
                     else:
-                        count += num
-                        current_pos += num
-            
-            while(readsleft)
-                allele_reads{}
-                for allele_det in alleles_found:
-                    read = allele_file[allele_det].readline()
-                    if(read == ''):
-                        readsleft = False
-                        break
+                        reference_allele[pos][seq] += 1
+                    return True
+                    
+                def extract_sequence(read_seq, cigars, pos, reference_allele):
+                    #print pos
+                    current_pos = pos - 1 
+                    count = 0
+                    #while( current < reference_allele && count < read_length):
+                    for cigar in cigars:
+                        num, score = filter(None,re.split('(\d+)',cigar))
+                        num = int(num)
+                        if score == 'M' or 'S' or 'H' or '=' or 'X':
+                            for i in range(0,num):
+                                if(count + i < len(read_seq)):
+                                    updateRef(reference_allele, current_pos + i, read_seq[count + i])
+                            current_pos += num
+                            count += num
+                        elif score == 'D':
+                            for i in range(0,num):
+                                updateRef(reference_allele, current_pos + i, 'D')
+                            current_pos += num
+                            count += num
+                        elif score == 'I':
+                            updateRef(reference_allele, current_pos, read_seq[count:count+num])
+                            count += num
+                            current_pos += num
+                        else:
+                            count += num
+                            current_pos += num
+                
+                while(readsleft):
+                    allele_reads={}
+                    for allele_det in alleles_found:
+                        read = allele_file[allele_det].readline()
+                        #print read
+                        if(read == ''):
+                            readsleft = False
+                            break
+                        allele_reads[allele_det] = read.split()
                         
-                    allele_reads{allele_det} = read.split()
-                    
-                if(readsleft):
-                    allele_sel = best_read(allele_reads,alleles_found)
-                    cigar_data = cigar_re.findall(allele_reads[allele_sel][5]) 
-                    extract_sequence(allele_reads[allele_sel][9],cigar_data,allele_reads[allele_sel][3], allele_alignment_data[allele_sel])
-                    
-            for allele_det in alleles_found:
-                gene_name = allele_det.split('*')[0]
-                allele_sequence = HLAs[gene_name][allele_det]
-                if(reportNewAllele(allele_alignment_data[allele_sel],allele_sequence))
-                    print "New Allele Detected. Highest match to existing allele: {0}".format(allele_sel)
-                else
-                    print "Complete match to allele {0}".format(allele_sel) 
+                    if(readsleft):
+                        alleles_sel = best_read(allele_reads,alleles_found)
+                        #print allele_reads[allele_sel]
+                        for allele_sel in alleles_sel:
+                            if(len(allele_reads[allele_sel]) >= 6):
+                                cigar_data = cigar_re.findall(allele_reads[allele_sel][5])
+                                #print allele_reads[allele_sel]
+                                #print allele_reads[allele_sel][3]
+                                extract_sequence(allele_reads[allele_sel][9],cigar_data,int(allele_reads[allele_sel][3]), allele_alignment_data[allele_sel])
+                                
+                            
+                            
+                            
+                            
             
-            
+                def reportNewAllele(allele_data, allele_sequence):
+                    i = 0
+                    match = True
+                    sequence = ""
+                    for c in allele_sequence:
+                        #if(i < 5):
+                        #    i+=1
+                        #    continue
+                        
+                        #if i >= len(allele_data):
+                        #    break
+                        if allele_data[i] == None or len(allele_data[i]) == 0:
+                            print "Missing Coverage at Position: {0}".format(i+1)
+                            match = False
+                            i += 1
+                            continue
+                        #print allele_data[i]
+                        variants = sorted(allele_data[i], key=lambda k: int(allele_data[i][k]), reverse=True)
+                        sequence += variants[0]
+                        if(variants[0]!= c):
+                            if(variants[0] == 'D'):
+                                print "Nucleotide Deletion at Position: {0}".format(i+1)
+                            elif(len(variants[0]) > 1):
+                                print "Insertion Sequence {0} at Position: {1}".format(variants[0],i+1)
+                            else:
+                                print "Nucleotide Change to {0} at Position: {1}".format(variants[0],i+1)
+                                
+                            match = False
+                            
+                        #match = match and (variants[0] == c)
+
+                        i += 1
+                    #Enable printing of novel sequence
+                    print_output_sequence = True
+                    if (not match and print_output_sequence):
+                        #print allele_data
+                        print "Assembled Sequence For New Allele:"
+                        for s in range(0, len(sequence), 60):
+                            print sequence[s:s+60]
+                    return match
+                    
+                for allele_det in alleles_found:
+                    gene_name = allele_det.split('*')[0]
+                    allele_sequence = HLAs[gene_name][allele_det]
+                    #print allele_alignment_data[allele_sel]
+                    if(not reportNewAllele(allele_alignment_data[allele_det],allele_sequence)):
+                        print "New Allele Detected. Highest match to existing allele: {0}".format(allele_det)
+                    else:
+                        print "Complete match to allele {0}".format(allele_det) 
+                
+                
             success = [False for i in range(len(test_HLA_names))]
             found_list = [False for i in range(len(test_HLA_names))]
             for prob_i in range(len(HLA_prob)):
@@ -1257,6 +1353,7 @@ def test_HLA_genotyping(base_fname,
                         num_mismatch,
                         verbose,
                         detect_allele,
+                        error_rate,
                         daehwan_debug):
     # Current script directory
     curr_script = os.path.realpath(inspect.getsourcefile(test_HLA_genotyping))
@@ -1341,13 +1438,13 @@ def test_HLA_genotyping(base_fname,
             pass
         
     if not excluded_alleles_match:
-        print("Creating Allele Exclusion File.\n")
+        print("Creating Allele Exclusion File. Alleles excluded: {0}\n".format(exclude_allele_list))
         afile = open(HLA_fnames[6],'w')
         afile.write("Alleles excluded:\n")
         afile.write("\n".join(exclude_allele_list))
         afile.close()
         
-    print HLA_fnames
+    #print HLA_fnames
     
     if (not check_files(HLA_fnames)) or (not excluded_alleles_match) :
         extract_hla_script = os.path.join(ex_path, "hisat2_extract_HLA_vars.py")
@@ -1356,7 +1453,7 @@ def test_HLA_genotyping(base_fname,
                        "--hla-list", ','.join(hla_list)]
 
         if len(exclude_allele_list) > 0:
-            print exclude_allele_list
+            #print exclude_allele_list
             extract_cmd += ["--exclude-allele-list", ",".join(exclude_allele_list)]
 
         if len(base_fname) > 3:
@@ -1567,7 +1664,7 @@ def test_HLA_genotyping(base_fname,
         match_score[qual] = math.log(1.000000000001 - error_rate);
         mismatch_score[qual] = math.log(error_rate / 3.0);
     """
-    # Test HLA typing
+# Test HLA typing
     test_list = []
     if simulation:
         basic_test, pair_test = True, False
@@ -1581,45 +1678,43 @@ def test_HLA_genotyping(base_fname,
         test_list = []
         genes = list(set(hla_list) & set(HLA_names.keys()))
         if basic_test:
-            for gene in genes:
-                HLA_gene_alleles = HLA_names[gene]
-                for HLA_name in HLA_gene_alleles:
-                    if HLA_name.find("BACKBONE") != -1:
-                        continue
-                    test_list.append([[HLA_name]])
+            if custom_allele_check:
+                for allele in default_allele_list:
+                    test_list.append([[allele]])
+            else:
+                for gene in genes:
+                    HLA_gene_alleles = HLA_names[gene]
+                    for HLA_name in HLA_gene_alleles:
+                        if HLA_name.find("BACKBONE") != -1:
+                            continue
+                        test_list.append([[HLA_name]])
         if pair_test:
             test_size = 500
             allele_count = 2
-            for test_i in range(test_size):
-                test_pairs = []
-                for gene in genes:
-                    HLA_gene_alleles = []
+            if custom_allele_check:
+                if (default_allele_list) < allele_count:
+                    print >> sys.stderr, "# of default alleles (%d) is at least %d" % (len(defeault_allele_list), allele_count)
+                    sys.exit(1)
                     
-                    for allele in HLA_names[gene]:
-                        if allele.find("BACKBONE") != -1:
-                            continue
-                        HLA_gene_alleles.append(allele)
-                    nums = [i for i in range(len(HLA_gene_alleles))]
-                    random.shuffle(nums)
-                    test_pairs.append(sorted([HLA_gene_alleles[nums[i]] for i in range(allele_count)]))
-                test_list.append(test_pairs)
+                for test_i in range(1):
+                    random.shuffle(default_allele_list)
+                    test_pair = [default_allele_list[:allele_count]]
+                    test_list.append(test_pair)
+            else:
+                for test_i in range(test_size):
+                    test_pairs = []
+                    for gene in genes:
+                        HLA_gene_alleles = []
 
-        print test_list
-        if custom_allele_check:
-        
-            test_list = []
-            if basic_test:
-            #test_pairs = []
-            #allele_count = 2
-            #for allele in default_allele_list:
-            #nums = [i for i in range(len(default_allele_list))]
-            #random.shuffle(nums)
-            #test_pairs.append(sorted([default_allele_list[nums[i]] for i in range(allele_count)]))
-            #test_list.append(test_pairs)
-                for allele in default_allele_list:
-                    test_list.append([[allele]])
-        print test_list
-        
+                        for allele in HLA_names[gene]:
+                            if allele.find("BACKBONE") != -1:
+                                continue
+                            HLA_gene_alleles.append(allele)
+                        nums = [i for i in range(len(HLA_gene_alleles))]
+                        random.shuffle(nums)
+                        test_pairs.append(sorted([HLA_gene_alleles[nums[i]] for i in range(allele_count)]))
+                    test_list.append(test_pairs)
+
         for test_i in range(len(test_list)):
             if "test_id" in daehwan_debug:
                 daehwan_test_ids = daehwan_debug["test_id"].split('-')
@@ -1629,7 +1724,7 @@ def test_HLA_genotyping(base_fname,
             print >> sys.stderr, "Test %d" % (test_i + 1)
             test_HLA_list = test_list[test_i]
            
-            # daehwan - for debugging purposes
+            # DK - for debugging purposes
             # test_HLA_list = [["A*11:50Q", "A*11:01:01:01", "A*01:01:01:01"]]
             for test_HLA_names in test_HLA_list:
                 for test_HLA_name in test_HLA_names:
@@ -1643,12 +1738,13 @@ def test_HLA_genotyping(base_fname,
                     test_HLA_seq = HLAs[gene][test_HLA_name]
                     seq_type = "partial" if test_HLA_name in partial_alleles else "full"
                     print >> sys.stderr, "\t%s - %d bp (%s sequence)" % (test_HLA_name, len(test_HLA_seq), seq_type)
+                    
             if custom_allele_check:
-                simulate_reads(HLAs_default, test_HLA_list, simulate_interval)
+                simulate_reads(HLAs_default, test_HLA_list, simulate_interval, error_rate)
             else:
-                simulate_reads(HLAs, test_HLA_list, simulate_interval)
+                simulate_reads(HLAs, test_HLA_list, simulate_interval, error_rate)
 
-            if "test_id" in daehwan_debug:
+            if "single-end" in daehwan_debug:
                 read_fname = ["hla_input_1.fa"]
             else:
                 read_fname = ["hla_input_1.fa", "hla_input_2.fa"]
@@ -1803,10 +1899,15 @@ if __name__ == '__main__':
                         type=str,
                         default="",
                         help="e.g., test_id:10,read_id:10000,basic_test")
-    parser.add_argument("--detect_allele",
+    parser.add_argument("--detect-allele",
                         dest="detect_allele",
                         action='store_true',
-                        help="Change test to detection of new alleles. Report sensitivity and specificity rate at the end.")
+                        help="Change test to detection of new alleles. Allow output of new allele sequences.")
+    parser.add_argument("--error-rate",
+                        dest="error_rate",
+                        type=float,
+                        default = -1.0,
+                        help="Set read error rate (decimal).")                        
 
 
     args = parser.parse_args()
@@ -1835,39 +1936,12 @@ if __name__ == '__main__':
     if len(args.exclude_allele_list) > 0:
         if args.exclude_allele_list.strip().isdigit():
             num_alleles = int(args.exclude_allele_list)
-            
-            
-            #if not os.path.exists("./Default-HLA/hla_backbone.fa"):
-                #try:
-                #    os.mkdir("./Default-HLA")
-                #except:
-                #    pass
-                #curr_script = os.path.realpath(inspect.getsourcefile(test_HLA_genotyping))
-                #ex_path = os.path.dirname(curr_script)
-                #extract_hla_script = os.path.join(ex_path, "hisat2_extract_HLA_vars.py")
-                #extract_cmd = [extract_hla_script,
-                #               "--reference-type", args.reference_type,
-                #               "--hla-list", ','.join(hla_list),
-                #               "--base", "./Default-HLA/hla"]
-                #if partial:
-                #    extract_cmd += ["--partial"]
-                #extract_cmd += ["--inter-gap", "30",
-                #                "--intra-gap", "50"]
-                #if verbose:
-                #    print >> sys.stderr, "\tRunning:", ' '.join(extract_cmd)
-                #proc = subprocess.Popen(extract_cmd, stdout=open("/dev/null", 'w'), stderr=open("/dev/null", 'w'))
-                #proc.communicate()
-                #if not os.path.exists("./Default-HLA/hla_backbone.fa"):
-                #    print >> sys.stderr, "Error: extract_HLA_vars (Default) failed!"
-                #    sys.exit(1)
        
             HLAs_default = {}
-            #read_HLA_alleles("./Default-HLA/hla_backbone.fa",HLAs_default)
-            #read_HLA_alleles("./IMGTHLA/hla_gen.fasta",HLAs_default)
             fname = "./IMGTHLA/hla_gen.fasta"
             for line in open(fname):
                 if line.startswith(">"):
-                    print line
+                    #print line
                     HLA_name = line.strip().split()[1]
                     HLA_gene = HLA_name.split('*')[0]
                     if not HLA_gene in HLAs_default:
@@ -1876,8 +1950,6 @@ if __name__ == '__main__':
                         HLAs_default[HLA_gene][HLA_name] = ""
                 else:
                     HLAs_default[HLA_gene][HLA_name] += line.strip()
-                        
-            print HLAs_default.keys()
 
             allele_names = list(HLAs_default['A'].keys())
             random.shuffle(allele_names)
@@ -1914,4 +1986,5 @@ if __name__ == '__main__':
                         args.num_mismatch,
                         args.verbose,
                         args.detect_allele,
+                        args.error_rate,
                         debug)
