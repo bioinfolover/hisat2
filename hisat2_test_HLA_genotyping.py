@@ -979,15 +979,8 @@ def HLA_typing(ex_path,
             print >> sys.stderr
 
             HLA_prob = single_abundance(HLA_cmpt, HLA_lengths[gene])
-            #print "Testing!!!"
-            #print HLA_prob[0]
             
-            #if index_type == "graph" and len(test_HLA_names) == 2:
-            #    HLA_prob = joint_abundance(HLA_cmpt, HLA_lengths[gene])
-                #if(len(HLA_prob) > 0):
-            #    print HLA_prob[0][0].split('-')
-                
-                
+            # Begin read alignment check for novel alleles    
             if index_type == "graph" and detect_allele:
                 #num_alleles = 1
                 alleles_found = []
@@ -997,16 +990,16 @@ def HLA_typing(ex_path,
                 except:
                     pass  
                 
-                    
+                #Identify closest matching alleles from results.    
                 if len(test_HLA_names) == 2:
                     HLA_prob_temp = joint_abundance(HLA_cmpt, HLA_lengths[gene])
                     alleles_found = HLA_prob_temp[0][0].split('-')
                 else:
                     alleles_found.append(HLA_prob[0][0])
-                
-                print alleles_found
                 allele_file = {}
                 allele_alignment_data = {}
+                
+                #Setup alignment results for both alleles
                 for allele_det in alleles_found:
                     #print HLAs
                     gene_name = allele_det.split('*')[0]
@@ -1026,7 +1019,7 @@ def HLA_typing(ex_path,
                     
                     seq_dest = "./Genotyping/{0}/{0}.fa".format(allele_det)
                     
-                    
+                    #Perform read alignment to closest alleles. Store results in Genotyping folder
                     HLA_hisat2_graph_index_fnames = ["./Genotyping/{0}/hla.graph.{1}.ht2".format(allele_det,(i+1)) for i in range(8)]
                     HLA_hisat2_graph_index_fnames.append(seq_dest)
                     if not check_files(HLA_hisat2_graph_index_fnames):
@@ -1081,7 +1074,8 @@ def HLA_typing(ex_path,
                 read_count = 0
                 readsleft = True
             
-                #May need to check 'M' sites for mismatches!!!
+                #Determine whether a given read matches to one or both alleles.
+                #May need to check 'M' sites for mismatches.
                 def best_read(read_data, allele_list):
                     best = [allele_list[0]]
                     b_matches = 0
@@ -1090,10 +1084,11 @@ def HLA_typing(ex_path,
                         return best
                     cigar_re = re.compile('\d+\w')
                     
+                    setup = True
                     for allele in allele_list:
                         if(len(read_data[allele]) < 6):
                             continue
-                            
+                        
                         cigar_data = cigar_re.findall(read_data[allele][5])
                         c_matches = 0
                         for x in cigar_data:
@@ -1102,15 +1097,19 @@ def HLA_typing(ex_path,
 		                    
                             if 'D' in x:
                                 c_matches -= int(x.split('D')[0])
-                        if best[0] == allele_list[0]:
+                        #print allele
+                        #print "Score: {0}".format(c_matches)
+                        if setup:
+                            setup = False
                             b_matches = c_matches
                         elif (c_matches == b_matches):
                             best.append(allele)
                         elif (c_matches > b_matches):
                             b_matches = c_matches
                             best = [allele]
+                            
                     return best
-                    
+                #Update reference with read data.    
                 def updateRef(reference_allele, pos, seq):
                     if(pos >= len(reference_allele)):
                         return False
@@ -1123,6 +1122,8 @@ def HLA_typing(ex_path,
                         reference_allele[pos][seq] += 1
                     return True
                     
+                    
+                #Extract consensus sequence from read alignment data 
                 def extract_sequence(read_seq, cigars, pos, reference_allele):
                     #print pos
                     current_pos = pos - 1 
@@ -1150,6 +1151,7 @@ def HLA_typing(ex_path,
                             count += num
                             current_pos += num
                 
+                #Scan through read alignments to closest alleles and output novel sequences (if any are found)
                 while(readsleft):
                     allele_reads={}
                     for allele_det in alleles_found:
@@ -1162,19 +1164,13 @@ def HLA_typing(ex_path,
                         
                     if(readsleft):
                         alleles_sel = best_read(allele_reads,alleles_found)
-                        #print allele_reads[allele_sel]
                         for allele_sel in alleles_sel:
                             if(len(allele_reads[allele_sel]) >= 6):
                                 cigar_data = cigar_re.findall(allele_reads[allele_sel][5])
-                                #print allele_reads[allele_sel]
-                                #print allele_reads[allele_sel][3]
                                 extract_sequence(allele_reads[allele_sel][9],cigar_data,int(allele_reads[allele_sel][3]), allele_alignment_data[allele_sel])
                                 
                             
-                            
-                            
-                            
-            
+                #Output novel allele sequence with variant report.
                 def reportNewAllele(allele_data, allele_sequence):
                     i = 0
                     match = True
